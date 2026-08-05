@@ -3,11 +3,15 @@
  *
  * Migrations run inside a transaction and are recorded in schema_migrations, so
  * every migration runs exactly once and a failure rolls back cleanly.
+ *
+ * NOTE ON 001: it was rewritten once, before any deployment, when the destination
+ * changed from a Google Sheet to the CRM. That is the only time this is acceptable —
+ * no database in the field had applied it, and carrying dead sheet columns forever
+ * would have been worse. From here the append-only rule holds absolutely.
  */
 
 /**
- * Ordered list of migrations. Append only — never edit or reorder an existing entry,
- * because databases in the field have already applied it.
+ * Ordered list of migrations. Append only.
  * @type {{ name: string, sql: string }[]}
  */
 const MIGRATIONS = [
@@ -16,99 +20,142 @@ const MIGRATIONS = [
     sql: `
       -- WhatsApp groups we monitor.
       --
-      -- Keyed on wa_group_id (e.g. "120363012345678901@g.us") which WhatsApp
-      -- assigns permanently. v1 matched on group NAME, so renaming a group
-      -- silently stopped capture with no error. The name here is only a cached
-      -- label for display and is refreshed whenever we see the group.
+      -- Keyed on wa_group_id ("120363…@g.us"), which WhatsApp assigns permanently.
+      -- v1 matched on group NAME, so renaming a group silently stopped capture with
+      -- no error. The name here is a cached label for display only.
       CREATE TABLE groups (
-        id            INTEGER PRIMARY KEY AUTOINCREMENT,
-        wa_group_id   TEXT    NOT NULL UNIQUE,
-        name          TEXT    NOT NULL,
-        bank_column   TEXT,
-        is_active     INTEGER NOT NULL DEFAULT 1,
-        created_at    TEXT    NOT NULL DEFAULT (datetime('now')),
-        updated_at    TEXT    NOT NULL DEFAULT (datetime('now'))
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        wa_group_id  TEXT    NOT NULL UNIQUE,
+        name         TEXT    NOT NULL,
+
+        -- 'inhouse' routes to the CRM (Way 1). 'bank' is Way 2, not yet designed.
+        purpose      TEXT    NOT NULL DEFAULT 'inhouse'
+                     CHECK (purpose IN ('inhouse', 'bank')),
+
+        is_active    INTEGER NOT NULL DEFAULT 0,
+
+        -- Sending is off by default and enabled per group (S5). Bank groups must
+        -- never have this on.
+        send_enabled INTEGER NOT NULL DEFAULT 0,
+
+        created_at   TEXT    NOT NULL DEFAULT (datetime('now')),
+        updated_at   TEXT    NOT NULL DEFAULT (datetime('now'))
       );
 
       CREATE INDEX idx_groups_active ON groups(is_active);
 
-      -- Every message we captured a lead from.
+      -- WhatsApp number -> CRM user.
       --
-      -- wa_message_id is UNIQUE: WhatsApp can redeliver a message after a
-      -- reconnect, and this makes reprocessing a no-op instead of a duplicate row.
+      -- Hand-maintained: the CRM's own users.phone is optional and null in practice
+      -- (C9), so this cannot be synced. Name and email are seeded from GET /users.
+      CREATE TABLE employees (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        wa_phone        TEXT    NOT NULL UNIQUE,
+        crm_profile_id  TEXT    NOT NULL,
+        name            TEXT    NOT NULL,
+        email           TEXT,
+        is_active       INTEGER NOT NULL DEFAULT 1,
+        created_at      TEXT    NOT NULL DEFAULT (datetime('now')),
+        updated_at      TEXT    NOT NULL DEFAULT (datetime('now'))
+      );
+
+      CREATE INDEX idx_employees_profile ON employees(crm_profile_id);
+
+      -- One row per lead message seen in a monitored group.
+      --
+      -- wa_message_id is UNIQUE and written BEFORE the CRM is called. WhatsApp
+      -- redelivers messages after a reconnect, and a network failure mid-create
+      -- leaves us unable to tell whether the CRM committed — recording first makes
+      -- both cases recoverable instead of producing duplicates.
       CREATE TABLE leads (
-        id             INTEGER PRIMARY KEY AUTOINCREMENT,
-        wa_message_id  TEXT    UNIQUE,
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        wa_message_id   TEXT    NOT NULL UNIQUE,
+        group_id        INTEGER REFERENCES groups(id) ON DELETE SET NULL,
 
-        name           TEXT    NOT NULL,
-        -- phone is the canonical form (digits only, national number without
-        -- country code where we can determine it). phone_raw preserves what
-        -- was actually written, for auditing.
-        phone          TEXT    NOT NULL,
-        phone_raw      TEXT,
-        status         TEXT,
-        remark         TEXT,
+        name            TEXT,
+        phone           TEXT,
+        sender_phone    TEXT,
+        raw_message     TEXT    NOT NULL,
 
-        group_id       INTEGER REFERENCES groups(id) ON DELETE SET NULL,
-        bank_column    TEXT,
+        -- Who was @mentioned, and who that resolved to in the CRM.
+        mentioned_phone TEXT,
+        employee_id     INTEGER REFERENCES employees(id) ON DELETE SET NULL,
 
-        raw_message    TEXT    NOT NULL,
-        sender         TEXT,
-        parser         TEXT,
-        confidence     REAL,
+        crm_lead_id     TEXT,
 
-        -- Sheet sync state. 'pending' rows are retried by the sync worker,
-        -- so a Google API outage delays leads instead of losing them —
-        -- v1 recorded the failure and never tried again.
-        sheet_status   TEXT    NOT NULL DEFAULT 'pending'
-                       CHECK (sheet_status IN ('pending', 'synced', 'failed', 'skipped')),
-        sheet_row      INTEGER,
-        sheet_error    TEXT,
-        sheet_attempts INTEGER NOT NULL DEFAULT 0,
-        synced_at      TEXT,
+        -- pending  accepted, not yet sent
+        -- created  in the CRM
+        -- existing the phone was already a lead there (Q5)
+        -- held     needs a human: no mention, unknown mention, several mentions
+        -- failed   gave up after retries
+        status          TEXT    NOT NULL DEFAULT 'pending'
+                        CHECK (status IN ('pending','created','existing','held','failed')),
+        held_reason     TEXT,
+        attempts        INTEGER NOT NULL DEFAULT 0,
+        last_error      TEXT,
 
-        created_at     TEXT    NOT NULL DEFAULT (datetime('now'))
+        -- Whether the group has been told about this lead (S2: one reply per message)
+        replied         INTEGER NOT NULL DEFAULT 0,
+
+        created_at      TEXT    NOT NULL DEFAULT (datetime('now')),
+        updated_at      TEXT    NOT NULL DEFAULT (datetime('now'))
       );
 
-      CREATE INDEX idx_leads_phone       ON leads(phone);
-      CREATE INDEX idx_leads_created     ON leads(created_at DESC);
-      CREATE INDEX idx_leads_group       ON leads(group_id);
-      CREATE INDEX idx_leads_sheet_state ON leads(sheet_status, sheet_attempts);
+      CREATE INDEX idx_leads_status  ON leads(status, attempts);
+      CREATE INDEX idx_leads_phone   ON leads(phone);
+      CREATE INDEX idx_leads_crm     ON leads(crm_lead_id);
+      CREATE INDEX idx_leads_created ON leads(created_at DESC);
 
-      -- Remarks added later by replying to a lead message in WhatsApp.
+      -- Replies that update an existing lead.
       --
-      -- v1 matched replies by comparing the quoted message's exact text against
-      -- stored raw_message, which missed on any whitespace difference. We now
-      -- match on the quoted message's ID, which is exact by construction.
-      CREATE TABLE lead_remarks (
-        id            INTEGER PRIMARY KEY AUTOINCREMENT,
-        lead_id       INTEGER NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
-        wa_message_id TEXT    UNIQUE,
-        text          TEXT    NOT NULL,
-        sender        TEXT,
-        synced        INTEGER NOT NULL DEFAULT 0,
-        created_at    TEXT    NOT NULL DEFAULT (datetime('now'))
+      -- Matched to the parent via the quoted message's WhatsApp ID, which is exact
+      -- by construction. v1 compared quoted message TEXT and missed on any
+      -- whitespace difference.
+      CREATE TABLE lead_updates (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        wa_message_id   TEXT    NOT NULL UNIQUE,
+        lead_id         INTEGER NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
+
+        -- 'fields' writes CRM columns; 'remark' appends to the remarks endpoint.
+        -- Never lead.notes — that is destructive and shared with the AI call
+        -- pipeline (C1).
+        kind            TEXT    NOT NULL CHECK (kind IN ('fields','remark')),
+        payload         TEXT    NOT NULL,
+        body            TEXT    NOT NULL,
+        sender_phone    TEXT,
+
+        status          TEXT    NOT NULL DEFAULT 'pending'
+                        CHECK (status IN ('pending','applied','failed')),
+        attempts        INTEGER NOT NULL DEFAULT 0,
+        last_error      TEXT,
+        replied         INTEGER NOT NULL DEFAULT 0,
+
+        created_at      TEXT    NOT NULL DEFAULT (datetime('now'))
       );
 
-      CREATE INDEX idx_remarks_lead ON lead_remarks(lead_id);
+      CREATE INDEX idx_updates_lead   ON lead_updates(lead_id);
+      CREATE INDEX idx_updates_status ON lead_updates(status, attempts);
 
-      -- Messages seen in monitored groups that did NOT produce a lead.
+      -- Everything seen in a monitored group that produced neither a lead nor an
+      -- update, with the reason.
       --
-      -- This is the feedback loop v1 lacked: when a lead is missed, the message
-      -- is here with the reason, so parser gaps are visible instead of invisible.
+      -- This includes messages filtered as noise, which never reach the CRM but are
+      -- kept here deliberately: the noise list is a guess about how people talk and
+      -- will be wrong somewhere. Keeping the raw record means it can be corrected
+      -- against real usage (R11.1).
       CREATE TABLE skipped_messages (
         id            INTEGER PRIMARY KEY AUTOINCREMENT,
-        wa_message_id TEXT    UNIQUE,
+        wa_message_id TEXT    NOT NULL UNIQUE,
         group_id      INTEGER REFERENCES groups(id) ON DELETE SET NULL,
         body          TEXT    NOT NULL,
         reason        TEXT    NOT NULL,
-        sender        TEXT,
+        sender_phone  TEXT,
         reviewed      INTEGER NOT NULL DEFAULT 0,
         created_at    TEXT    NOT NULL DEFAULT (datetime('now'))
       );
 
-      CREATE INDEX idx_skipped_created  ON skipped_messages(created_at DESC);
-      CREATE INDEX idx_skipped_reviewed ON skipped_messages(reviewed);
+      CREATE INDEX idx_skipped_created ON skipped_messages(created_at DESC);
+      CREATE INDEX idx_skipped_reason  ON skipped_messages(reason);
 
       CREATE TABLE settings (
         key        TEXT PRIMARY KEY,
