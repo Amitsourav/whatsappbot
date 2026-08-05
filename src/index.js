@@ -45,10 +45,18 @@ async function main() {
 
   if (crm.configured) {
     try {
-      const me = await crm.whoami();
+      // Refuses to continue if the key resolves to a different company: the same
+      // email exists in both tenants as different people, so a mis-set key would
+      // assign leads to the wrong person entirely.
+      const me = await crm.verifyTenant();
       await crm.loadUsers();
-      logger.info(`CRM connected as ${me.email} (${me.company_name || 'unknown company'})`);
+      logger.info(`CRM connected as ${me.email} — ${me.company_name} (${me.company_id})`);
     } catch (error) {
+      if (/Wrong CRM tenant/.test(error.message)) {
+        logger.error(error.message);
+        logger.error('Refusing to start rather than write to the wrong company.');
+        process.exit(1);
+      }
       // Not fatal: leads are still captured and retried once the CRM returns.
       logger.error(`CRM unreachable at startup: ${error.message}`);
       logger.warn('Leads will be captured and retried until it is back.');
