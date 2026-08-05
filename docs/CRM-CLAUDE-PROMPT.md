@@ -217,3 +217,60 @@ and know what's actually missing.
 >
 > Nothing else for now — a second WhatsApp capture path is still being designed and
 > we'll come back once it's specified.
+
+---
+
+## Prompt 4 — Production key (send this now)
+
+> The WhatsApp integration is working end to end against the sandbox. Leads posted
+> in our internal WhatsApp group are being created in the CRM, assigned to the
+> tagged employee, at stage `created`. Duplicate detection, remarks and partial
+> updates all verified over the wire.
+>
+> We now need to point it at the **live FundMyCampus tenant**. Two things, please.
+>
+> **1. An API key for the live FMC company**
+>
+> Same shape as the sandbox key — a service account with admin scope, minted
+> through `POST /api-keys`. Admin scope matters because search is silently scoped
+> down for non-admin roles, and we need to look a lead up by phone reliably.
+>
+> Please send it through a private channel rather than chat, and give us the
+> `company_id` it belongs to so we can confirm we are pointed at the right tenant
+> before the first write.
+>
+> The delete guard, attribution and revocation you already built all carry over —
+> nothing new needed there.
+>
+> **2. The five people below need to exist as CRM users in that tenant**
+>
+> Leads are assigned by tagging someone in WhatsApp, and we map each WhatsApp
+> number to a CRM user. Please confirm each of these has an account, and send us
+> their `profile_id`, or tell us which are missing:
+>
+> | Name | Email |
+> |---|---|
+> | Ankit Dubey | ankit@fundmycampus.com |
+> | Deepak | deepak@admitverse.com |
+> | Himanshu | hbhatia4216@gmail.com |
+> | Rudra | fundmycampus@gmail.com |
+> | Zaid | zaid@fundmycampus.com |
+>
+> **One question about Deepak.** His account is on Admitverse, which we understand
+> is a separate tenant. If a lead in the FMC group is tagged to him, we cannot set
+> `assigned_agent_id` to a user from another tenant — our client refuses it before
+> sending rather than risking a foreign-key 500. What would you like us to do:
+> does he have an FMC account too, should such leads be left unassigned, or should
+> they be held for a human? We will hold them for review unless you say otherwise.
+>
+> **Two notes on what to expect once we switch over**
+>
+> Unlike the empty sandbox, the live tenant already contains most of these people,
+> so **duplicates will be the common case, not the exception**. Our behaviour there
+> is: do not create a second lead, do not change who it is assigned to, and attach
+> the WhatsApp message as a remark on the existing lead. Tell us if you would
+> rather we did something else.
+>
+> We will also be writing remarks at a steadier rate than before — one per shared
+> lead, plus one per detail added in the group. All through
+> `POST /leads/{id}/remarks`, never `lead.notes`.
