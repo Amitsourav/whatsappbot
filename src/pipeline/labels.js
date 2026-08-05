@@ -12,6 +12,7 @@ const {
   resolveLabel, ARRAY_FIELDS, NUMERIC_FIELDS, LABEL_FORBIDDEN,
   MAX_LENGTH, LOCKED_LISTS
 } = require('../crm/fields');
+const amount = require('./amount');
 
 /** `:` `-` and `=` are all accepted (R11.3). */
 const LABELLED_LINE = /^\s*([A-Za-z%][A-Za-z\s%]{0,29}?)\s*[:=\-–—]\s*(.+?)\s*$/;
@@ -123,6 +124,14 @@ function parse(text) {
 
     const match = trimmed.match(LABELLED_LINE);
     if (!match) {
+      // A line that is entirely a money amount fills loan_amount without needing
+      // a label. Money carries markers — "lakh", "cr", "₹" — that nothing else
+      // does, so recognising it is not a guess.
+      const money = amount.detect(trimmed);
+      if (money.isAmount && !result.fields.loan_amount) {
+        result.fields.loan_amount = money.value;
+        continue;
+      }
       result.plain.push(trimmed);
       continue;
     }

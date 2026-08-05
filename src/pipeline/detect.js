@@ -11,6 +11,7 @@
  */
 const phoneUtil = require('./phone');
 const labelParser = require('./labels');
+const amount = require('./amount');
 
 /** Words that are never a person's name, even on a line of their own. */
 const NOT_A_NAME = new Set([
@@ -128,10 +129,16 @@ function classify(message) {
   const parsed = labelParser.parse(text);
   const name = extractName(text);
 
+  // Money is the one thing inferred without a label — see amount.js.
+  if (!parsed.fields.loan_amount) {
+    const found = amount.findInLines(text);
+    if (found) parsed.fields.loan_amount = found;
+  }
+
   // Everything that is not a recognised field becomes remark text, so the
   // original wording survives alongside the structured data.
   const remarkParts = [
-    ...parsed.plain,
+    ...parsed.plain.filter((line) => !amount.detect(line).isAmount),
     ...parsed.rejected.map((r) => `${r.label}: ${r.value}`)
   ];
 
