@@ -155,3 +155,32 @@ groups contain people we do not control, so Way 2 cannot simply reuse R9.
 
 A lead message always contains a phone number **and** an employee `@mention`. Both
 present means new lead; anything else is not.
+
+### Topic: Reply handling details (Q8a–Q8f) — all answered
+
+| | Question | Decision |
+|---|---|---|
+| Q8a | Noise in Notes? | **No.** Filter "ok", "done", emoji-only. Never reaches CRM |
+| Q8b | Label aliases? | **Yes.** `Clg` / `College` / `University` → College |
+| Q8c | Accept `-` and `=` as separators? | **Yes** *(assumed, pending confirm)* |
+| Q8d | Several fields in one reply? | **Yes.** Update all of them |
+| Q8e | Unknown labels? | **Yes, to Notes.** Never dropped |
+| Q8f | Overwriting a filled field? | **Yes, overwrite.** Old value preserved in Notes |
+
+Recorded as **R11.1–R11.6**.
+
+Two engineering notes attached to these answers:
+
+**On Q8a — the filter must match the whole message, never a word inside one.**
+"done" alone is noise; "documents done" is information. A substring match would
+silently discard real updates, which is exactly the class of failure R9 was chosen
+to avoid.
+
+**Safeguard added:** filtered messages are still written to our own database even
+though they never reach the CRM. The noise list is a guess about how people talk,
+and it will be wrong somewhere. Keeping the raw record means it can be corrected
+against real usage instead of argued about in the abstract.
+
+**On Q8f — the CRM holds current truth, Notes holds history.** A field overwrite
+appends the previous value and a timestamp to Notes, so nothing that was once
+recorded is ever destroyed by a correction.

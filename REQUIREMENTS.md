@@ -118,6 +118,41 @@ Consequences of this rule, all deliberate:
 - **No AI, no API cost, fully predictable.** The same input always produces the
   same result, which also makes it straightforwardly testable.
 
+**R11 — Detailed reply rules.**
+
+**R11.1 — Noise is filtered, not written to Notes.**
+Acknowledgements and reactions never reach the CRM. A reply is noise only when the
+**entire message** is trivial — an emoji-only message, or exactly one of a short
+list such as ok / okay / k / done / thanks / yes / noted / got it.
+
+The whole-message condition is essential. "done" alone is noise; "documents done"
+is information and must be kept. The filter matches the complete message, never a
+word inside a longer one.
+
+*Safeguard:* filtered messages are still stored in our own database, so nothing is
+truly lost and the noise list can be corrected later against real data.
+
+**R11.2 — Field labels have aliases.**
+`Clg:`, `College:` and `University:` all resolve to the College field. Matching is
+case-insensitive and tolerant of surrounding spaces. Aliases matter because staff
+will not remember one exact spelling.
+
+**R11.3 — `:` `-` and `=` are all accepted as separators.**
+`College: DU`, `College - DU` and `College = DU` are equivalent. Being strict here
+only produces lost updates. *(Assumed; confirm.)*
+
+**R11.4 — One reply may set several fields.**
+`College: DU` and `Course: MBA` in a single message updates both.
+
+**R11.5 — Unknown labels go to Notes, never dropped.**
+`Budget: 20L` when the CRM has no Budget field is appended to Notes verbatim, so
+the information survives even though no field matched.
+
+**R11.6 — A new value overwrites, and the old value is preserved in Notes.**
+If College holds "Delhi University" and a reply sets "Mumbai University", the field
+becomes Mumbai University and Notes records the change with the previous value and
+a timestamp. The CRM shows current truth; Notes carries the history.
+
 **R10 — In-house and bank groups are different problems.**
 In the in-house group we control the people, so a message format can be mandated —
 which is what makes R9 workable. In bank groups we do not control who writes what,
@@ -151,21 +186,8 @@ Skip it, create the lead unassigned, or hold it for review in the panel?
 **Q7 — Who may update a lead by replying?**
 Anyone in the group, only the assigned employee, or only admins?
 
-**Q8 — How does the bot tell an update from ordinary chat?** ✅ *Answered — see R9.*
-
-Follow-on details still to settle:
-
-- **Q8a — Noise in Notes.** Under R9, "ok", "done" and "👍" all land in Notes.
-  Filter these out, or keep everything as a full conversation record?
-- **Q8b — Label aliases.** Should `Clg:`, `College:` and `University:` all map to
-  the College field? Aliases make the habit easier to keep.
-- **Q8c — Separators.** Accept `-` and `=` as well as `:`?
-- **Q8d — Several fields in one reply.** `College: DU` and `Course: MBA` sent
-  together — one reply, two field updates?
-- **Q8e — Unknown labels.** `Budget: 20L` when the CRM has no Budget field. Goes
-  to Notes rather than being dropped — confirm.
-- **Q8f — Overwriting.** A field already holds a value and a new reply sets it to
-  something different. Overwrite, and record the previous value in Notes?
+**Q8 — How does the bot tell an update from ordinary chat?** ✅ *Answered — see R9
+and R11.*
 
 **Q9 — Can one message contain several leads?**
 And if so, several different mentions?
