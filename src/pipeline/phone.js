@@ -79,7 +79,11 @@ function extract(text) {
 
   // Match runs that could be a number with optional country code and separators.
   // Requires at least 10 digits so 6-digit pincodes and 4-digit years never match.
-  const candidates = text.match(/(?:\+?\d[\d\s\-().]{8,}\d)/g) || [];
+  //
+  // Spaces and tabs are allowed inside a run but NOT newlines: with \s, two
+  // numbers on consecutive lines merge into one over-long run, which is then
+  // rejected as too long — losing both.
+  const candidates = text.match(/\+?\d[\d \t\-().]{8,}\d/g) || [];
 
   for (const candidate of candidates) {
     const digits = stripFormatting(candidate).replace(/^\+/, '');

@@ -197,3 +197,28 @@ describe('labels.parse — structured updates', () => {
     assert.deepEqual(r.fields, {});
   });
 });
+
+describe('phone.extract — newline handling (regression)', () => {
+  test('two numbers on adjacent lines are both found', () => {
+    // A run allowed to span newlines merges them into one over-long run, which is
+    // then rejected as too long — silently losing both numbers.
+    assert.deepEqual(
+      phone.extract('Priya\n9876543210\n9812345670'),
+      ['+919876543210', '+919812345670']
+    );
+  });
+});
+
+describe('detect — mention placeholders are not the lead phone (regression)', () => {
+  test("the mentioned employee's number is never taken as the lead's phone", () => {
+    // The body renders a mention as "@919812345678". Without excluding mentioned
+    // numbers, the lead is filed under the phone of the person it was assigned to.
+    const detect = require('../src/pipeline/detect');
+    const r = detect.classify({
+      text: 'New lead @919812345678\nPriya Sharma\n9876543210',
+      mentions: ['+919812345678']
+    });
+    assert.equal(r.phone, '+919876543210');
+    assert.deepEqual(r.extraPhones, []);
+  });
+});
