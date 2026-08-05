@@ -150,3 +150,34 @@ Confirmation for an unnamed lead shows the number alone:
 +91 82720 61608
 Assigned to @Ankit
 ```
+
+
+---
+
+## Amendment, 2026-08-05 — a duplicate shows where the lead stands
+
+Message 2 was a bare "already exists". In the live CRM, with 10,000 leads, that is
+the common reply — and it left the team no wiser than before. It now reports the
+lead's actual state, so nobody has to open the CRM to find out whether it is
+already being worked, and by whom.
+
+```
+⚠️ Already in the CRM · #8871
+Jaanvi Dixit · +91 75798 83047
+
+Stage: Processing
+Counsellor: Rudra Taneja
+Pre-counsellor: Himanshu
+University: GLA University, Mathura
+Course: B.Tech
+Loan: 7 Lakh
+Added: 12 Mar 2026
+
+Your message was saved as a note
+```
+
+Only fields that hold a value are shown — a blank row is noise. Agent names are
+resolved from the cached user list, because the single-lead response does not
+always populate them.
+
+Assignment is still never changed, and the message is still saved as a remark.

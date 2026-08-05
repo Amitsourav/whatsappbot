@@ -219,6 +219,8 @@ class Orchestrator {
         // But if that lead is finished — disbursed, lost, enrolled — a remark lands
         // on a record nobody is watching. On a large lead base "lost" is common, so
         // a genuinely revived enquiry would be buried on a dead record. Hold it.
+        // Fetched so the group can be told where this lead actually stands,
+        // and so a finished lead is not silently appended to.
         let existing = null;
         if (error.existingLeadId) {
           existing = await this.crm.getLead(error.existingLeadId).catch(() => null);
@@ -254,7 +256,13 @@ class Orchestrator {
 
         if (group) {
           await this.send(group, replies.leadExists({
-            name: lead.name, phone: lead.phone, existingName: error.existingLeadName
+            name: lead.name,
+            phone: lead.phone,
+            existingName: error.existingLeadName,
+            lead: existing,
+            // The single-lead response does not always populate agent names, so
+            // resolve them from the cached user list instead.
+            resolveUser: (id) => (id ? this.crm.users?.get(id)?.full_name : null)
           }), rawMessage, () => repo.leads.markReplied(lead.id));
         }
         return;

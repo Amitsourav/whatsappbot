@@ -39,16 +39,42 @@ const replies = {
 
   /**
    * 2 — the phone was already a lead (Q5).
-   * Assignment is deliberately unchanged: silently moving someone else's lead to
-   * a different person causes arguments.
+   *
+   * Shows where the lead actually stands, so nobody has to open the CRM to find
+   * out whether it is already being worked and by whom. Assignment is deliberately
+   * unchanged: silently moving someone else's lead causes arguments.
+   *
+   * @param {object} params
+   * @param {object} [params.lead] - the existing lead as returned by the CRM
+   * @param {(id: string) => string|null} [params.resolveUser] - id → display name
    */
-  leadExists({ name, phone, existingName, existingOwner }) {
-    const owner = existingOwner ? `\nAlready with ${existingOwner}` : '';
-    return {
-      text: `⚠️ Lead already exists\n${subject(existingName || name, phone)}${owner}`
-        + '\nAdded your message as a note',
-      mentions: []
-    };
+  leadExists({ name, phone, existingName, lead, resolveUser }) {
+    const lines = [`⚠️ Already in the CRM${lead?.serial_no ? ` · #${lead.serial_no}` : ''}`];
+    lines.push(subject(existingName || lead?.full_name || name, phone));
+
+    if (lead) {
+      const detail = [
+        ['Stage', STAGE_LABELS[lead.current_stage] || lead.current_stage],
+        ['Counsellor', lead.assigned_agent_name
+          || (resolveUser && resolveUser(lead.assigned_agent_id))],
+        ['Pre-counsellor', lead.pre_counsellor_name
+          || (resolveUser && resolveUser(lead.pre_counsellor_id))],
+        ['University', lead.university],
+        ['Course', lead.target_degree],
+        ['Loan', lead.loan_amount],
+        ['Bank', lead.bank_name],
+        ['Added', shortDate(lead.created_at)]
+      ].filter(([, value]) => value);
+
+      if (detail.length) {
+        lines.push('');
+        // Only fields that actually hold something — an empty row is noise.
+        for (const [label, value] of detail) lines.push(`${label}: ${value}`);
+      }
+    }
+
+    lines.push('', 'Your message was saved as a note');
+    return { text: lines.join('\n'), mentions: [] };
   },
 
   /** 3 — nobody was tagged (Q6). The lead is held, not discarded. */
@@ -139,6 +165,26 @@ const replies = {
   }
 };
 
+/** CRM stage values, as a person would say them. */
+const STAGE_LABELS = {
+  created: 'Created', contacted: 'Contacted', dnp: 'DNP', qualified: 'Qualified',
+  processing: 'Processing', logged_in: 'Logged in', sanctioned: 'Sanctioned',
+  pf_paid: 'PF paid', disbursed: 'Disbursed', opportunity: 'Opportunity',
+  lost: 'Lost', enrolled: 'Enrolled', connected: 'Connected',
+  docs_pending: 'Docs pending', docs_collected: 'Docs collected',
+  partial_docs_collected: 'Partial docs', application_done: 'Application done',
+  visa_applied: 'Visa applied', deposit_paid: 'Deposit paid'
+};
+
+/** "12 Mar 2026" — enough to judge whether a lead is stale. */
+function shortDate(iso) {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return new Intl.DateTimeFormat('en-GB',
+    { day: 'numeric', month: 'short', year: 'numeric' }).format(d);
+}
+
 /** Field names as people would say them, for confirmations. */
 const LABELS = {
   university: 'University',
@@ -165,4 +211,4 @@ function format(value) {
   return Array.isArray(value) ? value.join(', ') : String(value);
 }
 
-module.exports = { replies, prettyPhone, subject, tag, LABELS };
+module.exports = { replies, prettyPhone, subject, tag, LABELS, STAGE_LABELS, shortDate };

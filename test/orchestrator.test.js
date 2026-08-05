@@ -241,7 +241,7 @@ describe('duplicates (Q5)', () => {
     // Reassigning someone else's lead silently would cause arguments.
     assert.equal(crm.calls.updated.length, 0, 'must not change assignment');
     assert.equal(crm.calls.remarks[0].id, 'existing-crm-id');
-    assert.match(wa.sent[0].text, /Lead already exists/);
+    assert.match(wa.sent[0].text, /Already in the CRM/);
     assert.equal(repo.leads.recent()[0].status, 'existing');
   });
 
@@ -421,5 +421,58 @@ describe('CRM failures', () => {
     assert.equal(stored.name, 'Priya Sharma');
     assert.equal(stored.phone, '+919876543210');
     assert.equal(stored.raw_message.includes('Priya Sharma'), true);
+  });
+});
+
+describe('duplicate reply shows where the lead stands', () => {
+  test('reports stage, counsellor and detail from the existing lead', async () => {
+    // The point is that nobody should have to open the CRM to find out whether a
+    // lead is already being worked, and by whom.
+    makeGroup();
+    const crm = fakeCrm({
+      existingStage: 'processing',
+      createThrows: new DuplicateLeadError({
+        detail: 'exists', error_code: 'duplicate_lead',
+        existing_lead_id: 'existing-id', existing_lead_name: 'Jaanvi Dixit'
+      })
+    });
+    crm.getLead = async () => ({
+      id: 'existing-id', serial_no: 8871, full_name: 'Jaanvi Dixit',
+      current_stage: 'processing', assigned_agent_id: 'agent-1',
+      university: 'GLA University', loan_amount: '7 Lakh',
+      created_at: '2026-03-12T10:00:00Z'
+    });
+    crm.users = new Map([['agent-1', { id: 'agent-1', full_name: 'Rudra Taneja' }]]);
+
+    const wa = fakeWhatsApp();
+    await new Orchestrator({ crm, whatsapp: wa }).handle(incoming());
+
+    const text = wa.sent[0].text;
+    assert.match(text, /#8871/, 'serial so it can be found');
+    assert.match(text, /Stage: Processing/);
+    assert.match(text, /Counsellor: Rudra Taneja/, 'resolved from the cached user list');
+    assert.match(text, /University: GLA University/);
+    assert.match(text, /Loan: 7 Lakh/);
+  });
+
+  test('empty fields are left out rather than shown blank', async () => {
+    makeGroup();
+    const crm = fakeCrm({
+      createThrows: new DuplicateLeadError({
+        detail: 'exists', error_code: 'duplicate_lead', existing_lead_id: 'e1'
+      })
+    });
+    crm.getLead = async () => ({
+      id: 'e1', serial_no: 12, full_name: 'Someone',
+      current_stage: 'created', university: null, loan_amount: null
+    });
+    crm.users = new Map();
+
+    const wa = fakeWhatsApp();
+    await new Orchestrator({ crm, whatsapp: wa }).handle(incoming());
+
+    assert.doesNotMatch(wa.sent[0].text, /University:/);
+    assert.doesNotMatch(wa.sent[0].text, /Loan:/);
+    assert.match(wa.sent[0].text, /Stage: Created/);
   });
 });
