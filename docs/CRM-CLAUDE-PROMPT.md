@@ -160,3 +160,60 @@ and know what's actually missing.
 > **One question:** `normalize_phone` runs on create but not on update. We don't
 > intend to ever patch a phone number, so this doesn't affect us — but it looks
 > like a latent bug for any other caller that does. Worth a look independently.
+
+---
+
+## Prompt 3 — Follow-up (send this now)
+
+> That's a solid delivery — the `get_current_user` approach is exactly right, and
+> resolving the key to a service-account profile so attribution comes for free is
+> better than what we asked for. The delete guard sitting in middleware ahead of
+> routing is the right place for it.
+>
+> Four actions, then three questions.
+>
+> **Actions**
+>
+> **1. Yes — please fix `update_lead`.** Normalise the phone and run the same
+> duplicate pre-check that create uses, plus the test.
+>
+> This is not housekeeping for us. Our entire lead identity model is one lead per
+> phone number. If a counsellor edits a phone in the UI to `07004428198` while
+> `+917004428198` exists, you get two live leads for one person with no error —
+> and our service then finds two leads for one phone and cannot tell which to
+> update. A form your team uses daily silently breaks the assumption the whole
+> integration rests on. Please fix it before we go live.
+>
+> **2. Please commit and deploy.** The migration is already applied to the FMC
+> production database but the code isn't deployed, so `api_keys` exists in
+> production while nothing reads it. The key won't authenticate against
+> `be-crm-production.up.railway.app` until you deploy, which blocks us from
+> integrating at all.
+>
+> **3. Please rotate the sandbox key.** It came through a chat channel, so treat it
+> as exposed. Revoke and mint a fresh one — we'll take the new one through a
+> private channel. Same for the two account passwords.
+>
+> **4. Please check CRM-UI for 403 handling.** Absent credentials now return 401
+> instead of 403. The change is correct, but anything in the frontend branching on
+> "403 means no token" will misbehave.
+>
+> **Questions**
+>
+> **5. Please paste the contents of `docs/LEAD_FIELD_REFERENCE.md`.** We have the
+> path but not the file. We're mapping free text from WhatsApp onto your fields, so
+> we need every field name, its type, and the complete set of allowed values for
+> each enum. Without it we can't finish the mapping design.
+>
+> **6. Does a *successful* `POST /leads` return the new lead's `id` in the response
+> body?** You confirmed the duplicate error now carries `existing_lead_id`, but the
+> success path was never stated explicitly. We store that id to link the WhatsApp
+> conversation to the CRM record — without it, follow-up replies can never update
+> the right lead. Please confirm, with the actual success response shape.
+>
+> **7. Is there an endpoint that lists users/profiles** with name, email and id? We
+> need to map each employee's WhatsApp number to their CRM user, and we'd rather
+> read your user list than maintain a copy by hand that drifts out of date.
+>
+> Nothing else for now — a second WhatsApp capture path is still being designed and
+> we'll come back once it's specified.
