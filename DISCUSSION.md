@@ -305,3 +305,40 @@ is the exact failure mode every other decision here has been made to avoid. Ever
 write is attributed and logged, so a wrong edit is traceable and correctable.
 
 **Way 1 is fully specified. Implementation begins.**
+
+### Topic: The bot must now send messages (Q5, Q6, Q9)
+
+All three answers require posting into the group, which reverses the read-only rule
+that had been in `CLAUDE.md` since the start.
+
+- **Q5** lead already exists → say so in the group
+- **Q6** no `@mention` → ask for one
+- **Q9** several mentions → say two were tagged
+
+**Accepted, with guards.** It is the right product call: a lead held silently in a
+queue nobody checks is worthless, and feedback in the group is where the team
+already is.
+
+**What it costs.** Reading is invisible to Meta — a linked device consuming messages
+looks like WhatsApp open on a laptop. Sending is visible activity, and automated
+sending is the main signal ban-detection looks for. This case sits at the safe end
+(a private group we own, low volume, only quoted replies to messages that just
+arrived) but it is no longer zero-risk, and the account is new, which draws more
+scrutiny than an established one.
+
+**Also decided: confirm every lead, and confirm field updates.** The labelled-format
+habit only sticks with feedback — if `Clg - DU` silently lands in notes instead of
+the field, nobody ever learns to type it correctly. Silent for plain text and
+silent for noise, so the group does not fill up.
+
+Six safety rules recorded in `docs/BOT-MESSAGES.md`: ignore own messages, one reply
+per triggering message, hard rate limit, kill switch, in-house group only, and no
+sending on retries. Capture continues even when sending is disabled or rate-limited
+— a send problem must never cost a lead.
+
+**Q5 detail:** an existing lead is never reassigned. Silently moving someone else's
+lead to a different person causes arguments; the message is recorded as a note and a
+human can reassign.
+
+**Q6/Q9 detail:** the lead is held, not discarded, and appears in the admin panel so
+it cannot be forgotten.

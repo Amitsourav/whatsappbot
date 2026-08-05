@@ -52,8 +52,13 @@ casually — that advice was wrong and is gone.
 so `+919876543210`, `919876543210`, and `9876543210` are one person. Never create
 a second row for a phone that already exists.
 
-**The bot only ever reads.** It must never send a WhatsApp message, react, or
-mark anything read. If a feature seems to need sending, stop and ask.
+**The bot sends only the messages in `docs/BOT-MESSAGES.md`, only in the in-house
+group, only as a quoted reply.** It never reacts, never marks anything read, and
+never posts in a bank group. Sending is off by default per group and has a kill
+switch. If a feature seems to need any other kind of sending, stop and ask.
+
+**The bot ignores its own messages.** Its own replies contain no mention and no
+phone number; without this guard they can feed back into the pipeline.
 
 **Columns D–J of the sheet are the user's.** The bot writes A, B, C, K, and the
 bank columns from L onward. Never write to D–J, and never overwrite a non-empty
