@@ -112,8 +112,8 @@ function validate() {
     );
   }
 
-  if (!config.sheets.spreadsheetId) {
-    warnings.push('GOOGLE_SHEET_ID is not set — leads will be captured but not written to a sheet.');
+  if (!config.crm.baseUrl || !config.crm.apiKey) {
+    warnings.push('CRM_BASE_URL / CRM_API_KEY are not set — leads will be captured but not sent.');
   }
 
   return { fatal, warnings };
