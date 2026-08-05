@@ -21,7 +21,7 @@ const noise = require('./noise');
 const labelParser = require('./labels');
 const { replies } = require('./replies');
 const { LOCKED_LISTS } = require('../crm/fields');
-const { DuplicateLeadError } = require('../crm/client');
+const { DuplicateLeadError, CrmClient } = require('../crm/client');
 const repo = require('../db/repositories');
 const logger = require('../logger');
 
@@ -200,8 +200,8 @@ class Orchestrator {
       }
 
       if (result.remarkText) {
-        await this.crm.addRemark(created.id, result.remarkText).catch((e) =>
-          logger.warn(`Remark failed for ${created.id}: ${e.message}`));
+        await this.crm.addRemark(created.id, result.remarkText, lead.wa_message_id)
+          .catch((e) => logger.warn(`Remark failed for ${created.id}: ${e.message}`));
       }
 
       logger.info(`Lead created: ${lead.name} (${lead.phone}) → ${employee.name}`);
@@ -215,13 +215,38 @@ class Orchestrator {
       if (error instanceof DuplicateLeadError) {
         // Q5 — the existing lead keeps its current owner. The message is preserved
         // as a remark so nothing is lost and a human can reassign if needed.
+
+        // But if that lead is finished — disbursed, lost, enrolled — a remark lands
+        // on a record nobody is watching. On a large lead base "lost" is common, so
+        // a genuinely revived enquiry would be buried on a dead record. Hold it.
+        let existing = null;
+        if (error.existingLeadId) {
+          existing = await this.crm.getLead(error.existingLeadId).catch(() => null);
+        }
+
+        if (existing && CrmClient.isTerminal(existing)) {
+          repo.leads.markHeld(lead.id, `revived_${existing.current_stage}`);
+          logger.warn(`Lead ${lead.phone} matches a ${existing.current_stage} lead `
+            + `(${error.existingLeadId}) — held for review`);
+
+          if (group) {
+            await this.send(group, replies.revivedLead({
+              phone: lead.phone,
+              existingName: existing.full_name,
+              stage: existing.current_stage
+            }), rawMessage, () => repo.leads.markReplied(lead.id));
+          }
+          return;
+        }
+
         repo.leads.markExisting(lead.id, error.existingLeadId);
 
         if (error.existingLeadId) {
           await this.crm.addRemark(
             error.existingLeadId,
             `Re-shared in WhatsApp by ${lead.sender_phone || 'a team member'}`
-              + `, tagged ${employee.name}\n\n${lead.raw_message}`
+              + `, tagged ${employee.name}\n\n${lead.raw_message}`,
+            lead.wa_message_id
           ).catch((e) => logger.warn(`Remark on duplicate failed: ${e.message}`));
         }
 
@@ -314,7 +339,8 @@ class Orchestrator {
       }
 
       if (remarkParts.length) {
-        await this.crm.addRemark(parent.crm_lead_id, remarkParts.join('\n'));
+        await this.crm.addRemark(parent.crm_lead_id, remarkParts.join('\n'),
+          record.wa_message_id);
       }
 
       repo.leadUpdates.markApplied(record.id);

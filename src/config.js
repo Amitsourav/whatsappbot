@@ -65,7 +65,9 @@ const config = {
     apiKey: process.env.CRM_API_KEY,
     companyId: process.env.CRM_COMPANY_ID,
     // The profile the API key resolves to. Used to recognise our own writes.
-    serviceProfileId: process.env.CRM_SERVICE_PROFILE_ID
+    serviceProfileId: process.env.CRM_SERVICE_PROFILE_ID,
+    // Startup refuses to write if the key resolves to a different company.
+    expectedCompanyId: process.env.CRM_EXPECTED_COMPANY_ID
   },
 
   db: {

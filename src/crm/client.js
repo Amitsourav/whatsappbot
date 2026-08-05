@@ -27,6 +27,16 @@ const RETRY_STATUS = new Set([408, 429, 500, 502, 503, 504]);
 const MAX_ATTEMPTS = 4;
 const BASE_DELAY_MS = 500;
 
+/**
+ * The CRM's database is in Korea and routinely takes 2–20s per request. A short
+ * timeout would turn ordinary slowness into a retry storm, and for a non-idempotent
+ * POST that means duplicates.
+ */
+const REQUEST_TIMEOUT_MS = 45_000;
+
+/** Stages where a lead is finished. A remark here lands on a record nobody watches. */
+const TERMINAL_STAGES = new Set(['disbursed', 'lost', 'enrolled']);
+
 class CrmError extends Error {
   constructor(message, { status, body, retryable = false } = {}) {
     super(message);
@@ -94,7 +104,8 @@ class CrmClient {
             'Content-Type': 'application/json',
             Accept: 'application/json'
           },
-          body: body === undefined ? undefined : JSON.stringify(body)
+          body: body === undefined ? undefined : JSON.stringify(body),
+          signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS)
         });
       } catch (error) {
         // Network-level failure. We cannot tell whether the server processed it,
@@ -188,6 +199,49 @@ class CrmClient {
   }
 
   /**
+   * Confirm the key resolves to the tenant we expect, before any write.
+   *
+   * The same email can exist in both tenants with different profile ids, so an id
+   * carried between environments points at a different person. This is the cheap
+   * check that catches a mis-set key before it writes to the wrong company.
+   *
+   * @returns {Promise<object>} the service account
+   * @throws if the tenant does not match config.crm.expectedCompanyId
+   */
+  async verifyTenant() {
+    const me = await this.whoami();
+    const expected = config.crm.expectedCompanyId;
+
+    if (expected && me.company_id !== expected) {
+      throw new CrmError(
+        `Wrong CRM tenant. The key belongs to "${me.company_name}" (${me.company_id}) `
+        + `but CRM_EXPECTED_COMPANY_ID is ${expected}. Refusing to write.`
+      );
+    }
+
+    this.identity = me;
+    return me;
+  }
+
+  /**
+   * Read a lead.
+   * @param {string} leadId
+   * @returns {Promise<object>}
+   */
+  async getLead(leadId) {
+    return this.request('GET', `/leads/${leadId}`);
+  }
+
+  /**
+   * Whether a lead is finished, so a remark would land where nobody is looking.
+   * @param {object} lead
+   * @returns {boolean}
+   */
+  static isTerminal(lead) {
+    return TERMINAL_STAGES.has(lead?.current_stage);
+  }
+
+  /**
    * Load the CRM user list and cache it.
    * Needed to validate assigned_agent_id before sending (C13).
    * @returns {Promise<object[]>}
@@ -268,11 +322,17 @@ class CrmClient {
    * @param {string} text
    * @returns {Promise<Object>}
    */
-  async addRemark(leadId, text) {
+  async addRemark(leadId, text, sourceId) {
     const trimmed = String(text || '').trim();
     if (!trimmed) throw new CrmError('Remark text is empty');
+
+    // The remarks endpoint is not idempotent: a retry after a timeout appends a
+    // second copy. Stamping the WhatsApp message id makes a duplicate obvious
+    // rather than mysterious, and lets a human trace it back to the message.
+    const stamped = sourceId ? `${trimmed}\n\n[wa:${sourceId}]` : trimmed;
+
     // Their validation is 1–5000 with a clean 422; truncate rather than fail.
-    return this.request('POST', `/leads/${leadId}/remarks`, { body: trimmed.slice(0, 5000) });
+    return this.request('POST', `/leads/${leadId}/remarks`, { body: stamped.slice(0, 5000) });
   }
 
   /** @returns {Promise<Object>} the authenticated service account */

@@ -95,6 +95,20 @@ const replies = {
     };
   },
 
+  /**
+   * 8 — the number matches a lead that is already finished.
+   * Appending to a closed record would bury a genuinely revived enquiry, so this
+   * asks for a human instead.
+   */
+  revivedLead({ phone, existingName, stage }) {
+    const STAGE = { disbursed: 'already disbursed', lost: 'marked lost', enrolled: 'enrolled' };
+    return {
+      text: `⚠️ This number is on a closed lead\n${subject(existingName, phone)}\n`
+        + `That lead is ${STAGE[stage] || stage} — check before working it again`,
+      mentions: []
+    };
+  },
+
   /** 5 — a reply set one or more CRM fields. */
   fieldsUpdated(updates) {
     return {

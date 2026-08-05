@@ -17,7 +17,7 @@ const RAHUL_CRM = 'crm-profile-rahul';
 
 /** A CRM double that records what it was asked to do. */
 function fakeCrm(overrides = {}) {
-  const calls = { created: [], updated: [], remarks: [] };
+  const calls = { created: [], updated: [], remarks: [], fetched: [] };
   return {
     calls,
     async createLead(fields) {
@@ -29,9 +29,14 @@ function fakeCrm(overrides = {}) {
       calls.updated.push({ id, fields });
       return { lead: { id, ...fields }, dropped: [] };
     },
-    async addRemark(id, text) {
-      calls.remarks.push({ id, text });
+    async addRemark(id, text, sourceId) {
+      calls.remarks.push({ id, text, sourceId });
       return { id: 'remark-1' };
+    },
+    async getLead(id) {
+      calls.fetched.push(id);
+      return { id, current_stage: overrides.existingStage || 'contacted',
+               full_name: overrides.existingName || 'Priya S' };
     }
   };
 }
@@ -238,6 +243,38 @@ describe('duplicates (Q5)', () => {
     assert.equal(crm.calls.remarks[0].id, 'existing-crm-id');
     assert.match(wa.sent[0].text, /Lead already exists/);
     assert.equal(repo.leads.recent()[0].status, 'existing');
+  });
+
+  test('a duplicate on a FINISHED lead is held, not silently appended', async () => {
+    // On a large lead base "lost" is common. A remark on a closed record is buried,
+    // so a genuinely revived enquiry would vanish. Ask a human instead.
+    makeGroup();
+    const crm = fakeCrm({
+      existingStage: 'lost',
+      existingName: 'Priya S',
+      createThrows: new DuplicateLeadError({
+        detail: 'exists', error_code: 'duplicate_lead',
+        existing_lead_id: 'closed-lead', existing_lead_name: 'Priya S'
+      })
+    });
+    const wa = fakeWhatsApp();
+    await new Orchestrator({ crm, whatsapp: wa }).handle(incoming());
+
+    assert.equal(crm.calls.remarks.length, 0, 'must not append to a closed lead');
+    assert.equal(repo.leads.held()[0].held_reason, 'revived_lost');
+    assert.match(wa.sent[0].text, /closed lead/);
+  });
+
+  test('remarks carry the WhatsApp message id so a retry duplicate is traceable', async () => {
+    // POST /remarks is not idempotent — a retry after a timeout appends a second
+    // copy. The stamp makes that identifiable rather than mysterious.
+    makeGroup();
+    const crm = fakeCrm();
+    await new Orchestrator({ crm, whatsapp: fakeWhatsApp() }).handle(incoming({
+      text: 'New lead @919812345678\nPriya Sharma\n9876543210\nvery keen'
+    }));
+
+    assert.ok(crm.calls.remarks[0].sourceId, 'remark must be stamped with its source');
   });
 });
 
