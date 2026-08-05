@@ -1,0 +1,21 @@
+# Dependencies
+node_modules/
+
+# Secrets — never commit these
+.env
+google-credentials.json
+
+# WhatsApp session — contains your login. Never commit, never delete.
+.wwebjs_auth/
+.wwebjs_cache/
+
+# Local data
+data/
+logs/
+*.log
+
+# Build output
+web/dist/
+
+# OS
+.DS_Store
