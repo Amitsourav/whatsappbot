@@ -220,3 +220,60 @@ The report covers the API's shape. We still need the **Lead field list** — exa
 names, types, and the allowed values for every enum — to implement R11.2 (label
 aliases) and R11.5 (unknown labels to remarks). Without it we cannot decide which
 labels map to which fields.
+
+---
+
+## Confirmed 2026-08-05 (second delivery)
+
+**Create returns the lead ID — confirmed with a real response.** `POST /leads` →
+201, body is the full `LeadOut` including `id` (UUID) and `serial_no` (per-tenant
+human-readable number, useful when quoting a lead to staff). This was the one
+structural requirement; it is satisfied.
+
+**User list — `GET /api/v1/users`.** Bare JSON array, not paginated or wrapped,
+scoped to our company, admin-only (our key has admin scope). Optional `?role=` and
+`?is_active=` filters. `id` is what goes in `assigned_agent_id`.
+
+**C9 — The employee map cannot be built from CRM data alone.** `users.phone` is
+optional and frequently null in live data. So the map is: seed names and emails
+from `GET /users`, then enter each employee's **WhatsApp number by hand** in our
+panel. This answers Q4 — a hybrid, not a pure sync.
+
+**C10 — A 201 is not proof the data landed.** Unknown keys are silently ignored on
+create, so a typo'd field name returns success with the value dropped. Every
+outgoing payload is validated against the accepted-field list before sending.
+
+**C11 — `loan_amount` and `bank_name` are update-only.** Sent to create, they are
+silently dropped. Capturing a loan amount from the first message therefore requires
+`POST /leads` then `PUT /leads/{id}` — two calls, and a failure of the second must
+be retried, not swallowed.
+
+**C12 — Over-length input returns 500, not 422.** DB lengths are not mirrored in
+Pydantic. Truncate client-side: `loan_amount` 50, `bank_name` 100.
+
+**C13 — `assigned_agent_id` is not validated; a bad UUID 500s at the FK.** Always
+resolve against the cached user list before sending.
+
+**C14 — Phone normalisation covers Indian formats only.** `0091…`, `91…`, `0…` and
+bare 10-digit all become `+91…`. Anything else is stored verbatim after a strip —
+so non-Indian numbers, extensions, and text like "98765 43210 call after 6" will
+not dedupe against their normalised form. Our extractor must therefore emit clean
+digits, never raw message fragments.
+
+**Remarks validation is clean:** 1–5000 chars, proper 422. Attributed to whoever
+the credential is.
+
+### Still not deployed
+
+`git push` was blocked by a permission classifier on their side. Commit `342e7c9`
+(18 files) exists locally but is not pushed, so Railway has not deployed and the
+API key still does not authenticate against the production URL. Owner must either
+grant the push permission or run `git push origin main`.
+
+### Offered, not yet accepted
+
+`create_lead`'s email check is exact-match while the index is `lower(email)`, so
+creating `Foo@x.com` when `foo@x.com` exists returns 500. Same class of bug as the
+update one they just fixed. One line. **Recommend accepting** — we may write emails
+from WhatsApp messages, and a 500 is indistinguishable from a real outage to a
+retry loop.
