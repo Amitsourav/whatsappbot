@@ -125,3 +125,33 @@ Discussion in progress. Topics to cover:
 7. Deployment and cutover from the running v1
 
 *(Notes appended as we go.)*
+
+### Topic: How to treat replies (Q8)
+
+**Problem:** the rule "a reply updates the lead" breaks down because most replies in
+a working group are not information. Of a realistic seven replies on one lead, three
+carried data ("Delhi University", "she needs 15 lakh", "MBA course") and four were
+conversation ("ok", "calling her now", "👍", "done"). Writing all seven into fields
+would leave `College: ok` in the CRM.
+
+Framing that decided it: **a missed lead is visible, corrupted data is not.** Nobody
+notices a wrong value sitting in a field until it is used in front of a customer.
+
+**Options put forward:** (A) labelled format only, (B) AI interprets free text,
+(C) everything into Notes, (D) AI with human confirmation.
+
+**Decision: A + C combined.** Labelled replies write to structured fields; every
+other reply appends to Notes.
+
+Why this is a good fit here: it is fully deterministic, costs nothing, cannot
+corrupt a structured field, and loses no information. The cost is one habit for the
+team — use `Field: value` when you want a real field set.
+
+**Recorded as R9.** Also recorded as **R10**: this approach works because the
+in-house group contains our own staff, whose message format we can mandate. Bank
+groups contain people we do not control, so Way 2 cannot simply reuse R9.
+
+### Topic: Identifying a lead message (R8)
+
+A lead message always contains a phone number **and** an employee `@mention`. Both
+present means new lead; anything else is not.

@@ -86,6 +86,43 @@ field on the already-created lead. It does not create a second lead.
 Stored locally, keyed on the WhatsApp message ID, so a reply arriving days later
 still finds the right lead.
 
+**R8 — A lead message is identified by: a phone number AND an employee `@mention`.**
+Both must be present. This is the test for "is this a new lead" versus ordinary
+group chat.
+
+**R9 — Replies are handled by a labelled-format rule, with Notes as the catch-all.**
+
+*Chosen approach: labelled updates write to structured fields; everything else
+goes to Notes. Rejected: letting the bot interpret free text into structured
+fields — a wrong guess corrupts a CRM record silently, and silent corruption is
+worse than a missed update.*
+
+```
+Reply arrives on a lead message
+        │
+        ├─ Matches "FieldName: value" and FieldName is a known CRM field
+        │       └─→ update that structured field
+        │
+        └─ Anything else
+                └─→ append to Notes, with timestamp and sender
+```
+
+Consequences of this rule, all deliberate:
+
+- **A structured field is only ever written from an explicit label.** The bot never
+  infers that "she needs 15 lakh" means the Amount field.
+- **Nothing is ever lost.** Unrecognised text still lands in Notes, so information
+  is preserved even when it isn't understood.
+- **The team must learn one habit:** to set a real field, reply `College: Delhi
+  University`. Anything else is still captured, just as a note.
+- **No AI, no API cost, fully predictable.** The same input always produces the
+  same result, which also makes it straightforwardly testable.
+
+**R10 — In-house and bank groups are different problems.**
+In the in-house group we control the people, so a message format can be mandated —
+which is what makes R9 workable. In bank groups we do not control who writes what,
+so R9 cannot simply be reused there. Way 2 is decided separately.
+
 ## Open questions — Way 1
 
 **Q1 — What are the CRM's lead fields?**
@@ -114,9 +151,21 @@ Skip it, create the lead unassigned, or hold it for review in the panel?
 **Q7 — Who may update a lead by replying?**
 Anyone in the group, only the assigned employee, or only admins?
 
-**Q8 — How does the bot tell an update from ordinary chat?**
-A reply saying "ok" or "thanks" or "done" is not a field update. Writing those
-into CRM fields would corrupt the record. Needs a rule.
+**Q8 — How does the bot tell an update from ordinary chat?** ✅ *Answered — see R9.*
+
+Follow-on details still to settle:
+
+- **Q8a — Noise in Notes.** Under R9, "ok", "done" and "👍" all land in Notes.
+  Filter these out, or keep everything as a full conversation record?
+- **Q8b — Label aliases.** Should `Clg:`, `College:` and `University:` all map to
+  the College field? Aliases make the habit easier to keep.
+- **Q8c — Separators.** Accept `-` and `=` as well as `:`?
+- **Q8d — Several fields in one reply.** `College: DU` and `Course: MBA` sent
+  together — one reply, two field updates?
+- **Q8e — Unknown labels.** `Budget: 20L` when the CRM has no Budget field. Goes
+  to Notes rather than being dropped — confirm.
+- **Q8f — Overwriting.** A field already holds a value and a new reply sets it to
+  something different. Overwrite, and record the previous value in Notes?
 
 **Q9 — Can one message contain several leads?**
 And if so, several different mentions?
