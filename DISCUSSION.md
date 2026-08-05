@@ -184,3 +184,47 @@ against real usage instead of argued about in the abstract.
 **On Q8f — the CRM holds current truth, Notes holds history.** A field overwrite
 appends the previous value and a timestamp to Notes, so nothing that was once
 recorded is ever destroyed by a correction.
+
+### Topic: CRM discovery report received
+
+Report came back with file:line citations. Recorded in `docs/CRM-INTEGRATION.md`.
+
+**Fits our design better than expected:** stage `created` is automatic on create,
+`assigned_agent_id` is on the create schema so assignment is one call, `PUT` is a
+genuine partial patch, and `POST /leads/{id}/remarks` is an append-only notes table.
+
+**Two findings that would have caused silent damage:**
+
+1. **`lead.notes` is destructive on write, and the AI voice pipeline appends to that
+   same column.** Every "append to Notes" rule we wrote (R9, R11.1–R11.6) would have
+   destroyed the voice pipeline's data — damage in another system, which nobody
+   would have thought to check. Recorded as **C1**: Notes always means the remarks
+   endpoint.
+
+2. **`custom_fields` and `tags` are replace-not-merge on PUT**, so writing one key
+   wipes the rest, including the `ai_last_call` block the voice pipeline stores
+   there. Recorded as **C2**: never write these.
+
+**Three blockers**, all raised with the CRM team:
+
+- **B1 no machine credential** — only a ~1h user JWT. A service holding a human's
+  password can't be revoked without locking out that person, and its writes look
+  like theirs in the audit trail. Asked for a service account.
+- **B2 no idempotency, and the duplicate error omits the lead ID** — so we can't
+  turn "already exists" into "update that one" without an ambiguous substring
+  search. Asked for the `id` in the error body as the cheap fix, with idempotency
+  key or exact phone lookup as alternatives. Any one closes it.
+- **B3 no staging** — a local run points at production Supabase. Proposed a
+  **dedicated test tenant** instead, since the CRM is already multi-tenant. Far
+  cheaper than their backlog item #14 and solves our actual problem.
+
+**Also recorded:** C3 never patch phone (`normalize_phone` doesn't run on update),
+C4 authenticate as a dedicated admin and always send `assigned_agent_id` explicitly
+(a manager omitting it silently becomes the counsellor), C5 search is substring and
+can return several rows — more than one result means human review, never a guess.
+
+Stage values are 29, not the 23 their comment and ARCHITECTURE.md claim. Irrelevant
+to us — we only ever use `created` — but noted.
+
+**Still outstanding:** the Lead field list. Without exact field names and enum
+values we cannot implement R11.2 (aliases) or R11.5 (unknown labels).

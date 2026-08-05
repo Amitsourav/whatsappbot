@@ -85,24 +85,68 @@ and know what's actually missing.
 
 ---
 
-## Prompt 2 — Build (send only after reading the report)
+## Prompt 2 — Build (ready to send)
 
-*Draft. Fill in the gaps identified by Prompt 1 before sending.*
+*Written against the discovery report of 2026-08-05.*
 
-> Based on your report, please implement the following, and nothing beyond it:
+> Thanks — that report was exactly what we needed, and the `lead.notes` warning
+> saved us from corrupting the voice pipeline's data. We'll use
+> `POST /leads/{id}/remarks` throughout and leave `lead.notes` alone.
 >
-> *(list the specific missing endpoints here)*
+> Please implement the following, in this order, and nothing beyond it.
 >
-> Requirements that apply to all of it:
-> - **Create-lead must return the new lead's ID in the response.** The WhatsApp
->   service stores that ID to link the conversation to the record. Without it,
->   follow-up updates are impossible.
-> - **Update must accept a partial payload** — only the fields that changed.
-> - **Machine authentication**, separate from human login, and revocable.
-> - **A dedicated API user or role** for the integration, so its writes are
->   distinguishable from a person's in any audit trail.
-> - Validation errors must say which field failed and why.
-> - Do not add delete endpoints. The integration never deletes anything.
+> **1. A machine credential (highest priority — blocks everything)**
 >
-> Please also write a short integration document: endpoint, example request,
-> example response, for each thing you build.
+> We need a service account with admin scope and a long-lived, revocable
+> credential. A 24/7 integration cannot hold a human's password: it can't be
+> revoked without locking out that person, and its writes would be
+> indistinguishable from theirs in any audit trail.
+>
+> Whatever shape fits your codebase — a real API key, or extending
+> `X-Internal-Secret` to the lead endpoints with proper scoping. Requirements:
+> - Admin-equivalent scope (we need unscoped search — see item 3)
+> - Revocable independently of any human account
+> - Its writes identifiable as the integration's in any audit trail
+>
+> If this will take a while, tell us and we'll run on a dedicated admin user with
+> token rotation in the meantime — but we'd like the real thing.
+>
+> **2. Return the existing lead's ID in the duplicate error**
+>
+> The smallest change with the biggest effect for us. Today a duplicate create
+> returns `400 already exists` with no `id` in the body, so we can't pivot to
+> updating that lead — we'd have to fall back to substring search, which is
+> ambiguous.
+>
+> Please include the existing lead's `id` in the duplicate error response.
+>
+> If you'd rather solve it more thoroughly, either of these also works and we'd
+> take it gladly:
+> - An `Idempotency-Key` header on create
+> - `GET /leads/by-phone?phone=` — exact match, not substring
+>
+> Any one of the three closes it. We only need one.
+>
+> **3. A test tenant**
+>
+> We'll create dozens of throwaway leads while building, and they must not land in
+> live data. Since the CRM is already multi-tenant with per-tenant scoping, a
+> dedicated test tenant would isolate us without waiting for real staging
+> (backlog #14). Please create one and send us its credentials.
+>
+> **4. The Lead field list**
+>
+> Not code — just the reference. Every field on a lead: exact API name, type,
+> required or optional, and for every enum the complete set of allowed values.
+> We're mapping WhatsApp text onto these fields and need the exact strings the API
+> accepts.
+>
+> **Please do not:**
+> - Add any delete endpoint — this integration never deletes anything
+> - Change `custom_fields` or `tags` semantics on our account. We know they're
+>   replace-not-merge and we simply won't write to them
+> - Change `lead.notes`. We're staying away from it entirely
+>
+> **One question:** `normalize_phone` runs on create but not on update. We don't
+> intend to ever patch a phone number, so this doesn't affect us — but it looks
+> like a latent bug for any other caller that does. Worth a look independently.
