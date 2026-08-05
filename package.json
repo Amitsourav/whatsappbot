@@ -10,7 +10,7 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
-    "test": "node --test test/",
+    "test": "node --test test/**/*.test.js",
     "db:reset": "rm -f data/bot.db data/bot.db-wal data/bot.db-shm"
   },
   "dependencies": {
