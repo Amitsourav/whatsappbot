@@ -149,11 +149,19 @@ const leads = {
     `).run(String(error).slice(0, 1000), id);
   },
 
-  recordAttempt(id, error) {
+  /** Count an attempt. Called once before each CRM call, so a crash mid-flight
+   *  still counts and cannot retry forever. */
+  recordAttempt(id) {
     get().prepare(`
-      UPDATE leads SET attempts = attempts + 1, last_error = ?, updated_at = datetime('now')
-      WHERE id = ?
-    `).run(error ? String(error).slice(0, 1000) : null, id);
+      UPDATE leads SET attempts = attempts + 1, updated_at = datetime('now') WHERE id = ?
+    `).run(id);
+  },
+
+  /** Record why an attempt failed, without counting it twice. */
+  recordError(id, error) {
+    get().prepare(`
+      UPDATE leads SET last_error = ?, updated_at = datetime('now') WHERE id = ?
+    `).run(String(error).slice(0, 1000), id);
   },
 
   markReplied(id) {
@@ -222,10 +230,13 @@ const leadUpdates = {
     `).run(String(error).slice(0, 1000), id);
   },
 
-  recordAttempt(id, error) {
-    get().prepare(`
-      UPDATE lead_updates SET attempts = attempts + 1, last_error = ? WHERE id = ?
-    `).run(error ? String(error).slice(0, 1000) : null, id);
+  recordAttempt(id) {
+    get().prepare('UPDATE lead_updates SET attempts = attempts + 1 WHERE id = ?').run(id);
+  },
+
+  recordError(id, error) {
+    get().prepare('UPDATE lead_updates SET last_error = ? WHERE id = ?')
+      .run(String(error).slice(0, 1000), id);
   },
 
   markReplied(id) {
