@@ -111,6 +111,16 @@ and know what's actually missing.
 > If this will take a while, tell us and we'll run on a dedicated admin user with
 > token rotation in the meantime — but we'd like the real thing.
 >
+> **Please build the credential as a general mechanism, not wired to specific
+> endpoints.** This is a first phase; a second WhatsApp capture path is being
+> designed now and will likely need more of the API. We'd rather you build auth
+> that works across the lead endpoints generally than have to revisit it. Note that
+> `X-Internal-Secret` is currently attached to exactly two endpoints — that's the
+> shape we're trying to avoid repeating.
+>
+> One thing we do **not** want, now or later: **delete**. The integration never
+> deletes anything, and we'd like the credential to be unable to.
+>
 > **2. Return the existing lead's ID in the duplicate error**
 >
 > The smallest change with the biggest effect for us. Today a duplicate create

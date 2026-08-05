@@ -228,3 +228,15 @@ to us — we only ever use `created` — but noted.
 
 **Still outstanding:** the Lead field list. Without exact field names and enum
 values we cannot implement R11.2 (aliases) or R11.5 (unknown labels).
+
+### Topic: Sending Prompt 2 before Way 2 is designed
+
+Decided to send Prompt 2 now rather than wait. All four items — machine credential,
+lead ID in the duplicate error, test tenant, field list — are needed regardless of
+what Way 2 turns out to be, so holding them only delays work that has to happen.
+
+Added one instruction before sending: **build the credential as a general mechanism,
+not wired to specific endpoints.** Their existing `X-Internal-Secret` is attached to
+exactly two endpoints, which is why it is useless to us — repeating that shape would
+mean redoing the auth work when Way 2 lands. Also stated explicitly that the
+credential should be unable to delete, now or later.
