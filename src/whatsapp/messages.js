@@ -75,9 +75,12 @@ function normalise(raw) {
 
   // Real @mentions arrive as structured data — the mentioned person's JID —
   // rather than as text. This is what makes assignment exact (R1).
-  const mentions = (context?.mentionedJid || [])
-    .map(phone.fromJid)
-    .filter(Boolean);
+  //
+  // WhatsApp now addresses group members by LID ("2807…@lid") rather than by
+  // phone number, so a mention is often NOT resolvable here. Raw JIDs are passed
+  // through for the client to translate against the group's participant list.
+  const mentionJids = context?.mentionedJid || [];
+  const mentions = mentionJids.map(phone.fromJid).filter(Boolean);
 
   return {
     id: raw.key.id,
@@ -86,8 +89,12 @@ function normalise(raw) {
     fromMe: Boolean(raw.key.fromMe),
     senderPhone: phone.fromJid(senderJid),
     senderJid: senderJid || null,
+    senderIsLid: Boolean(senderJid && String(senderJid).endsWith('@lid')),
     text: textOf(unwrap(raw.message)),
     mentions: [...new Set(mentions)],
+    mentionJids,
+    // Unresolved LIDs, for the client to translate.
+    pendingLids: mentionJids.filter((j) => String(j).endsWith('@lid')),
     // stanzaId identifies the message being replied to. Matching on this is exact,
     // unlike v1's comparison of quoted message text.
     quotedId: context?.stanzaId || null,

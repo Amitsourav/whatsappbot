@@ -136,3 +136,38 @@ describe('toMentionJids', () => {
     assert.deepEqual(messages.toMentionJids(null), []);
   });
 });
+
+describe('LID addressing (regression — found in live testing)', () => {
+  test('a LID mention is surfaced for resolution, not silently dropped', () => {
+    // WhatsApp now addresses group members by an internal LID rather than a phone
+    // number. Treating an unresolvable mention as "no mention" made every tagged
+    // lead look untagged, and held them all.
+    const m = messages.normalise({
+      key: { id: 'M', remoteJid: '120363999@g.us', participant: '126851909435470@lid' },
+      message: {
+        extendedTextMessage: {
+          text: 'New lead @280715371515984',
+          contextInfo: { mentionedJid: ['280715371515984@lid'] }
+        }
+      }
+    });
+
+    assert.deepEqual(m.mentions, [], 'not resolvable without the participant list');
+    assert.deepEqual(m.pendingLids, ['280715371515984@lid'], 'but must be handed on');
+    assert.equal(m.senderIsLid, true);
+  });
+
+  test('phone-number mentions still resolve directly', () => {
+    const m = messages.normalise({
+      key: { id: 'M', remoteJid: '120363999@g.us', participant: '919876543210@s.whatsapp.net' },
+      message: {
+        extendedTextMessage: {
+          text: 'New lead @919812345678',
+          contextInfo: { mentionedJid: ['919812345678@s.whatsapp.net'] }
+        }
+      }
+    });
+    assert.deepEqual(m.mentions, ['+919812345678']);
+    assert.deepEqual(m.pendingLids, []);
+  });
+});

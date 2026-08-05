@@ -23,12 +23,16 @@ const QRCode = require('qrcode');
 const { config } = require('../config');
 const logger = require('../logger');
 const { normalise, toMentionJids } = require('./messages');
+const { fromJid: phoneFromJid } = require('../pipeline/phone');
 
 /** Reconnect backoff, capped so a long outage doesn't become an hour-long wait. */
 const RECONNECT_BASE_MS = 2000;
 const RECONNECT_MAX_MS = 60_000;
 
 /** Sending guard (S3): a hard ceiling so a bug can never flood a group. */
+/** Participant lists change rarely; one round trip per group per 10 minutes. */
+const LID_CACHE_TTL_MS = 10 * 60_000;
+
 const SEND_WINDOW_MS = 60_000;
 const SEND_MAX_PER_WINDOW = 12;
 
@@ -45,6 +49,8 @@ class WhatsAppClient extends EventEmitter {
     this.sendTimestamps = [];
     /** Message IDs we sent ourselves, so we can ignore them (S1). */
     this.ownMessageIds = new Set();
+    /** groupId -> { map: Map<lid, e164>, at: number } — see resolveLids(). */
+    this.lidCache = new Map();
   }
 
   get connected() {
@@ -167,6 +173,47 @@ class WhatsAppClient extends EventEmitter {
     }
   }
 
+  /**
+   * Translate LID identifiers to phone numbers.
+   *
+   * WhatsApp now addresses group members by an internal LID ("2807…@lid") rather
+   * than by phone number, so a mention often carries no number at all. The group's
+   * participant list maps the two, and is cached because it is one round trip per
+   * group.
+   *
+   * @param {string} groupId
+   * @param {string[]} lids
+   * @returns {Promise<string[]>} E.164 numbers, in the order given
+   */
+  async resolveLids(groupId, lids) {
+    if (!lids?.length) return [];
+
+    let entry = this.lidCache.get(groupId);
+    const stale = !entry || Date.now() - entry.at > LID_CACHE_TTL_MS;
+    const missing = entry && lids.some((l) => !entry.map.has(l));
+
+    // Refresh when stale, or when someone we have never seen is mentioned —
+    // a new joiner must not be silently unresolvable.
+    if (stale || missing) {
+      try {
+        const meta = await this.sock.groupMetadata(groupId);
+        const map = new Map();
+        for (const participant of meta.participants || []) {
+          const lid = participant.lid || participant.id;
+          const e164 = phoneFromJid(participant.jid || participant.id);
+          if (lid && e164) map.set(lid, e164);
+        }
+        entry = { map, at: Date.now() };
+        this.lidCache.set(groupId, entry);
+      } catch (error) {
+        logger.warn(`Could not read participants for ${groupId}: ${error.message}`);
+        if (!entry) return [];
+      }
+    }
+
+    return lids.map((lid) => entry.map.get(lid)).filter(Boolean);
+  }
+
   /** @private */
   onMessages({ messages, type }) {
     // 'notify' is a live message. 'append' is history sync, which we ignore —
@@ -185,8 +232,30 @@ class WhatsAppClient extends EventEmitter {
         continue;
       }
 
-      this.emit('message', message);
+      // Resolve identities before handing the message on, so the pipeline only
+      // ever sees phone numbers.
+      this.prepareAndEmit(message, raw).catch((error) =>
+        logger.error(`Failed to prepare message ${message.id}: ${error.message}`));
     }
+  }
+
+  /**
+   * Fill in phone numbers for LID-addressed mentions and senders, then emit.
+   * @private
+   */
+  async prepareAndEmit(message, raw) {
+    if (message.pendingLids?.length) {
+      const resolved = await this.resolveLids(message.groupId, message.pendingLids);
+      message.mentions = [...new Set([...message.mentions, ...resolved])];
+    }
+
+    if (!message.senderPhone && message.senderIsLid) {
+      const [sender] = await this.resolveLids(message.groupId, [message.senderJid]);
+      if (sender) message.senderPhone = sender;
+    }
+
+    // raw is passed through so a reply can quote the message that triggered it.
+    this.emit('message', message, raw);
   }
 
   /**

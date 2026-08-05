@@ -81,6 +81,19 @@ async function main() {
   });
 
   const server = createServer({ whatsapp, crm, orchestrator });
+
+  server.on('error', (error) => {
+    if (error.code === 'EADDRINUSE') {
+      logger.error(`Port ${config.server.port} is already in use.`);
+      logger.error('Another copy of the bot is probably running. Stop it first —');
+      logger.error(`  lsof -ti:${config.server.port} | xargs kill`);
+      logger.error('Two copies must never run against the same WhatsApp number.');
+    } else {
+      logger.error(`Server error: ${error.message}`);
+    }
+    process.exit(1);
+  });
+
   server.listen(config.server.port, config.server.host, () => {
     logger.info(`Admin panel on http://${config.server.host}:${config.server.port}`);
   });
