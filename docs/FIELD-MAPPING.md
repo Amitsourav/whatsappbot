@@ -1,6 +1,6 @@
 # WhatsApp label → CRM field mapping
 
-**Status: DRAFT — needs the owner's decisions on the marked rows.**
+**Status: SETTLED.** All mapping decisions made 2026-08-05.
 
 Source of truth for CRM fields: their `docs/LEAD_FIELD_REFERENCE.md`, received
 2026-08-05. This document is what R11.2 (aliases) and R11.5 (unknown labels) are
@@ -56,39 +56,30 @@ exactly, it goes to remarks instead — never a guess.
 | `Percentage`, `%` | `percentage` | Numeric, max 999.99 |
 | `Passing Year` | `passing_year` | Integer |
 | `Intake` | `target_intake` | Free text, e.g. "Sep-2026" |
+| `College`, `Clg`, `University`, `Univ` | `university` | **D1** — single field, `college_name` never written |
+| `Course`, `Degree` | `target_degree` | **D2** — free text, written verbatim |
+| `Country` | `preferred_countries` | **D3** — array. `country` never written |
 | `Loan`, `Loan Amount`, `Amount` | `loan_amount` | **Update-only (M2).** Free text, truncate to 50 |
 | `Bank` | `bank_name` | **Update-only (M2). Locked list (M6)** |
 
-## Decisions needed
+## Decisions — settled 2026-08-05
 
-**D1 — `College` vs `University`.**
-The CRM has **two separate fields**: `college_name` and `university`. An earlier
-draft of R11.2 wrongly folded `University` into College as an alias — that would
-put a university name in the wrong field.
+**D1 — `university`, not `college_name`.** All college/university labels resolve to
+the single field `university`. `College`, `Clg`, `University`, `Univ` → `university`.
+`college_name` is never written.
 
-Proposed: `College` / `Clg` → `college_name`, and `University` / `Univ` →
-`university`, kept distinct. **Confirm this matches how your team uses the words.**
+*This corrects an error in the first draft of R11.2, which folded University into a
+College field — that would have put university names in the wrong column.*
 
-**D2 — `Course` has no CRM field.**
-There is no `course`. The plausible destinations are `target_degree` (free text) or
-`stream` (free text).
+**D2 — `Course` → `target_degree`.** The CRM has no `course` field. `target_degree`
+is free text, so the value is written verbatim.
 
-Proposed: `Course` / `Degree` → `target_degree`. **Confirm.**
+**D3 — `Country` → `preferred_countries`.** Means where the student wants to study.
+The `country` field (residence, defaults to "India") is never written.
 
-**D3 — `Country` is ambiguous.**
-`country` means the lead's country of residence and defaults to "India".
-`preferred_countries` is an array meaning where they want to study. A WhatsApp
-message saying "Country: UK" almost certainly means the second.
-
-Proposed: `Country` → `preferred_countries`, and do not write `country` at all.
-**Confirm.**
-
-**D4 — Which labels should exist at all?**
-The full set above may be more than your team will ever use. A shorter list is
-easier to teach and easier to keep correct. Which of these will realistically be
-typed in the in-house group?
-
----
+**D4 — Withdrawn.** Supporting every label costs nothing in code, so there is no
+decision to make. All labels are supported; the team gets a short cheat sheet of the
+ones they will realistically use.
 
 ## Never written by the bot
 

@@ -277,3 +277,31 @@ normalisation nor a duplicate check. A counsellor editing a phone in the CRM UI 
 create two live leads for one person, silently defeating the dedup our entire
 identity model rests on. The other path raises an uncaught IntegrityError → 500 with
 internals leaked. Asked them to fix it — their estimate is two lines plus a test.
+
+### Topic: Final Way 1 decisions — all settled
+
+**D1 — `university`, never `college_name`.** One field for all college/university
+labels. Corrects an error in the first R11.2 draft that would have written
+university names into a college field.
+
+**D2 — `Course` → `target_degree`.** No `course` field exists in the CRM.
+
+**D3 — `Country` → `preferred_countries`** (where they want to study), never
+`country` (residence, defaults India).
+
+**D4 — withdrawn.** The question was pointless: supporting all fourteen labels costs
+nothing in code. All are supported; the team gets a cheat sheet of the ones they will
+actually use.
+
+**Library — Baileys**, decided rather than asked, since the owner had no basis to
+choose between them. Both do the same job with the same login and the same group
+access; Baileys uses roughly 100 MB against whatsapp-web.js's 500 MB because it
+speaks to WhatsApp directly instead of driving a headless Chrome. On a small VM the
+browser would consume most of available memory. Reversible if it disappoints.
+
+**Q7 — anyone in the group may update a lead by replying.** It is a private group of
+our own staff. Restricting it would mean genuine updates are silently ignored, which
+is the exact failure mode every other decision here has been made to avoid. Every
+write is attributed and logged, so a wrong edit is traceable and correctable.
+
+**Way 1 is fully specified. Implementation begins.**
