@@ -240,3 +240,40 @@ not wired to specific endpoints.** Their existing `X-Internal-Secret` is attache
 exactly two endpoints, which is why it is useless to us — repeating that shape would
 mean redoing the auth work when Way 2 lands. Also stated explicitly that the
 credential should be unable to delete, now or later.
+
+### Topic: CRM build delivered — B1 and B2 closed
+
+**B1 machine credential — done.** `X-API-Key`, resolved in `get_current_user`, so it
+works on every authenticated route and future routes inherit it. Deliberately not
+the endpoint-scoped `X-Internal-Secret` shape we warned against. The key resolves to
+a service-account *profile*, which is what makes attribution work — every audit
+column is an FK to `profiles.id`, so our writes appear under "WhatsApp Ingest
+Service". Cannot delete (global middleware, pre-routing), cannot manage keys.
+Recorded as **C6**.
+
+**B2 duplicate error — done.** Response now carries `existing_lead_id`,
+`existing_lead_name`, `error_code`, `duplicate_field`, with `detail` left
+byte-identical for the frontend. Fully closes the retry problem.
+
+**B3 test tenant — partially.** It is a separate tenant, **not a separate
+database** — it lives in FMC production Supabase, and isolation rests on
+`company_id` scoping that has zero dedicated tests. Recorded as **C8**: good for
+validating API shape, not a safety net. No bulk or destructive operations against
+it; test leads must be identifiable as test data.
+
+**New field facts:** `loan_amount_lakh` is write-only — absent from `LeadOut`, so
+reads must use `loan_amount` (**C7**). Stage value for Created is `created`.
+
+**Credentials were pasted into a chat channel.** Recommended rotation before the
+integration goes live — their own report raised the same point.
+
+**Not deployed.** Code is uncommitted in their working tree, but the migration was
+applied to production, so `api_keys` exists in prod while the code does not. The key
+will not authenticate against the live URL until they deploy. Additive-only, so the
+split state is safe; we simply cannot integrate yet.
+
+**Found on their side, affects us directly:** `update_lead` has neither phone
+normalisation nor a duplicate check. A counsellor editing a phone in the CRM UI can
+create two live leads for one person, silently defeating the dedup our entire
+identity model rests on. The other path raises an uncaught IntegrityError → 500 with
+internals leaked. Asked them to fix it — their estimate is two lines plus a test.

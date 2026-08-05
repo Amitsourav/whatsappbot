@@ -64,7 +64,97 @@ phone search returns more than one lead, do not guess — hold it for human revi
 
 ---
 
-## The three blockers
+## Additional derived rules
+
+**C6 — Authenticate with `X-API-Key`. The key resolves to a service-account
+profile.**
+
+Resolved inside `get_current_user`, so it works on every authenticated route and
+routes added later inherit it — nothing to wire for Way 2. Scope follows the
+profile's role; ours is admin, which gives the unscoped search C5 requires.
+
+Attribution is automatic: `leads.created_by`, `lead_remarks.author_id` and
+`lead_stage_logs.changed_by` are all FKs to `profiles.id`, so our writes are
+identifiable as the integration's rather than a person's. Verified live — a test
+remark came back authored by "WhatsApp Ingest Service".
+
+The key **cannot delete**: `ApiKeyDeleteGuardMiddleware` rejects any DELETE carrying
+the header before routing, before auth, before any DB work. Global, so future DELETE
+routes are covered automatically. It also cannot mint or manage keys.
+
+**C7 — Read `loan_amount`, never `loan_amount_lakh`.**
+
+`loan_amount_lakh` is write-only: it stores correctly but is absent from `LeadOut`,
+so it never comes back in a response. Reading it would always yield nothing.
+
+**C8 — The test tenant is a sandbox for API shape, not a safety net.**
+
+It is a separate *tenant*, not a separate database — it lives inside the FMC
+production Supabase project. Isolation rests entirely on `company_id` scoping, which
+is applied consistently but has **zero dedicated tests** (their backlog item #7).
+
+Consequences for how we test:
+- Fine for validating request/response shape and integration logic
+- **Not** protection against a bug in tenant scoping itself
+- Never run bulk or destructive operations against it
+- Every test lead we create should be obviously identifiable as test data
+
+Real staging remains their backlog item #14.
+
+---
+
+## Blocker status
+
+**B1 — machine credential: RESOLVED**, pending deploy. See C6.
+
+**B2 — duplicate error: RESOLVED.** The 400 body now carries `existing_lead_id`,
+`existing_lead_name`, `error_code` and `duplicate_field`. `detail` was deliberately
+left byte-identical for the frontend. This is exactly the cheap fix we asked for and
+it fully closes the retry problem: "already exists" now converts to "update that
+lead" in one hop, with no ambiguous search.
+
+```json
+{
+  "detail": "A lead with phone +919812345678 already exists (Rohit Verma).",
+  "error_code": "duplicate_lead",
+  "duplicate_field": "phone",
+  "existing_lead_id": "c964c6c3-3df1-4774-b596-35e6965e25d6",
+  "existing_lead_name": "Rohit Verma"
+}
+```
+
+**B3 — staging: PARTIALLY RESOLVED.** Test tenant exists; see C8 for its limits.
+
+---
+
+## Open risks on the CRM side
+
+**Not deployed.** The code is in their working tree, uncommitted. The migration
+`g7b8c9d0e1f2` (additive `CREATE TABLE api_keys`) *was* applied to the FMC
+production database, so the table exists in production while the code does not.
+**The API key will not authenticate against the live URL until they deploy.**
+Additive-only, so the split state is safe — but we cannot integrate until deploy.
+
+**Phone normalisation and dedup are missing on update.** `normalize_phone` runs only
+on create; `update_lead` is a plain `setattr` loop with no normalisation and no
+duplicate check. Both failure paths are reachable from the existing CRM edit form:
+
+- Editing a phone to `07004428198` when `+917004428198` exists stores it raw. No
+  index collision, because the strings differ — **two live leads for the same
+  person, and the dedup we rely on is silently defeated.**
+- Editing it to an exact existing match raises an uncaught `IntegrityError` → 500,
+  leaking `error_type`/`error_message` through the generic handler.
+
+This matters to us directly: our entire identity model assumes one lead per phone.
+A counsellor editing a phone in the UI can break that assumption without anyone
+noticing. **Asked them to fix it** — two lines plus a test, per their estimate.
+
+**401 replaces 403 for absent credentials.** Correct behaviour, but if anything in
+CRM-UI branches on "403 means no token", it needs checking.
+
+---
+
+## Superseded blockers
 
 ### B1 — No machine credential *(blocking)*
 
