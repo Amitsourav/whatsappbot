@@ -60,6 +60,14 @@ const config = {
     headless: bool(process.env.WA_HEADLESS, true)
   },
 
+  crm: {
+    baseUrl: process.env.CRM_BASE_URL,
+    apiKey: process.env.CRM_API_KEY,
+    companyId: process.env.CRM_COMPANY_ID,
+    // The profile the API key resolves to. Used to recognise our own writes.
+    serviceProfileId: process.env.CRM_SERVICE_PROFILE_ID
+  },
+
   db: {
     path: path.resolve(ROOT, process.env.DB_PATH || './data/bot.db')
   },

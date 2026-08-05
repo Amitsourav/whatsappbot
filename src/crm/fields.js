@@ -37,17 +37,39 @@ const UPDATE_FIELDS = new Set([
 ]);
 
 /**
- * Fields the bot must never write, whatever a message says.
+ * Fields the client must never send, in either direction.
  *
- * - notes            C1 — destructive, and the AI call pipeline appends there
- * - custom_fields    C2 — replace-not-merge, holds the voice pipeline's data
- * - tags             C2 — replace-not-merge
- * - phone            C3 — the lead's identity, set once at create
- * - current_stage    R5 — creation lands at `created`; we never advance a lead
+ * - notes          C1 — destructive, and the AI call pipeline appends there
+ * - custom_fields  C2 — replace-not-merge, holds the voice pipeline's data
+ * - tags           C2 — replace-not-merge
+ * - current_stage  R5 — creation lands at `created`; we never advance a lead
+ * - lost_reason /
+ *   dnp_count /
+ *   due_date       only meaningful alongside a stage change, which we never make
  */
-const NEVER_WRITE = new Set([
-  'notes', 'custom_fields', 'tags', 'phone', 'current_stage',
-  'lost_reason', 'dnp_count', 'due_date', 'assigned_agent_id'
+const NEVER_SEND = new Set([
+  'notes', 'custom_fields', 'tags', 'current_stage',
+  'lost_reason', 'dnp_count', 'due_date'
+]);
+
+/**
+ * Fields that may be sent on create but never on update.
+ *
+ * `phone` is the lead's identity (C3). It MUST be sent on create — without it
+ * there is nothing to deduplicate against — and must never be patched afterwards,
+ * because the CRM's normalisation historically did not run on the update path.
+ */
+const UPDATE_FORBIDDEN = new Set(['phone']);
+
+/**
+ * Fields no WhatsApp label may ever set, regardless of what someone types.
+ *
+ * Wider than NEVER_SEND: `phone` and `assigned_agent_id` are both written by the
+ * bot deliberately, but neither may be driven by text in a message. Nobody should
+ * be able to reassign a lead or change its identity by typing a line in the group.
+ */
+const LABEL_FORBIDDEN = new Set([
+  ...NEVER_SEND, 'phone', 'assigned_agent_id', 'pre_counsellor_id', 'lead_source_id'
 ]);
 
 /**
@@ -182,7 +204,9 @@ module.exports = {
   CREATE_FIELDS,
   UPDATE_FIELDS,
   UPDATE_ONLY_FIELDS,
-  NEVER_WRITE,
+  NEVER_SEND,
+  UPDATE_FORBIDDEN,
+  LABEL_FORBIDDEN,
   MAX_LENGTH,
   LOCKED_LISTS,
   LABEL_MAP,

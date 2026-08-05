@@ -9,7 +9,7 @@
  * missed update. Anything not confidently understood is returned as remark text.
  */
 const {
-  resolveLabel, ARRAY_FIELDS, NUMERIC_FIELDS, NEVER_WRITE,
+  resolveLabel, ARRAY_FIELDS, NUMERIC_FIELDS, LABEL_FORBIDDEN,
   MAX_LENGTH, LOCKED_LISTS
 } = require('../crm/fields');
 
@@ -140,7 +140,7 @@ function parse(text) {
       continue;
     }
 
-    if (NEVER_WRITE.has(field)) {
+    if (LABEL_FORBIDDEN.has(field)) {
       result.rejected.push({
         label: rawLabel.trim(),
         value: rawValue.trim(),
