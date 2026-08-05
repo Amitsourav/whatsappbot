@@ -144,9 +144,11 @@ function classify(message) {
     fields: parsed.fields,
     rejected: parsed.rejected,
     remarkText: remarkParts.length ? remarkParts.join('\n') : null,
+    // A missing name never blocks a lead: the phone number is the identity, and
+    // a lead is complete without a name. Only an unclear ASSIGNEE holds it up.
     reason: mentions.length === 0 ? 'no_mention'
       : mentions.length > 1 ? 'multiple_mentions'
-        : name ? null : 'no_name'
+        : null
   };
 }
 

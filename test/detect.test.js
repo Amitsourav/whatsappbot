@@ -85,11 +85,13 @@ describe('name extraction — best effort, never invented', () => {
     assert.equal(detect.extractName("D'Souza Maria\n9876543210"), "D'Souza Maria");
   });
 
-  test('a lead with no findable name is flagged, not guessed', () => {
+  test('a phone number alone is a complete lead — no name required', () => {
+    // Phone is the identity. Holding a lead for a missing name was wrong: a lead
+    // shared as just a number is complete, and the name can arrive later.
     const r = detect.classify({ text: '9876543210 @919812345678', mentions: [RAHUL] });
     assert.equal(r.isLead, true);
     assert.equal(r.name, null);
-    assert.equal(r.reason, 'no_name');
+    assert.equal(r.reason, null, 'must not be held');
   });
 
   test('strips the mention placeholder before looking for a name', () => {

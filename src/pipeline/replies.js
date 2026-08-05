@@ -29,8 +29,10 @@ function tag(e164) {
 const replies = {
   /** 1 — the lead reached the CRM. */
   leadCreated({ name, phone, employeePhone }) {
+    // Without a name the number stands alone — it is the identity, not a gap.
+    const head = name ? subject(name, phone) : prettyPhone(phone);
     return {
-      text: `✅ Lead created\n${subject(name, phone)}\nAssigned to ${tag(employeePhone)}`,
+      text: `✅ Lead created\n${head}\nAssigned to ${tag(employeePhone)}`,
       mentions: [employeePhone].filter(Boolean)
     };
   },

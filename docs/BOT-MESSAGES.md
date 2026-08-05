@@ -127,3 +127,26 @@ keeps running. If the bot ever misbehaves in front of the team, that is the butt
 groups are never eligible.
 
 **S6 — Never send on a retry loop.** Message 7 fires once. Retries are silent.
+
+
+---
+
+## Amendment, 2026-08-05 — a lead needs no name
+
+**Phone is the identity.** A lead shared as just a number is complete, and holding
+it for a missing name was wrong: it turned an ordinary message into a chore.
+
+The CRM requires `full_name`, so when no name is found the **phone number stands in
+as the name**. It is honest, searchable, and obviously provisional. A later reply
+carrying `Name: Priya Sharma` replaces it.
+
+Message 3c ("I couldn't find the student's name") is therefore withdrawn. The bot
+never asks for a name — only for an assignee it genuinely cannot determine.
+
+Confirmation for an unnamed lead shows the number alone:
+
+```
+✅ Lead created
++91 82720 61608
+Assigned to @Ankit
+```

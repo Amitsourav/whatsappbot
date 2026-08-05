@@ -187,7 +187,8 @@ describe('leads that are held for a human', () => {
     assert.match(wa.sent[0].text, /isn't set up as an employee/);
   });
 
-  test('no name → held rather than filed under a guess', async () => {
+  test('no name → created anyway, identified by its number', async () => {
+    // Phone is the identity; a lead shared as just a number is complete.
     makeGroup();
     const crm = fakeCrm();
     const wa = fakeWhatsApp();
@@ -195,9 +196,26 @@ describe('leads that are held for a human', () => {
       text: 'New lead @919812345678\n9876543210'
     }));
 
-    assert.equal(crm.calls.created.length, 0);
-    assert.equal(repo.leads.held()[0].held_reason, 'no_name');
-    assert.match(wa.sent[0].text, /couldn't find the student's name/);
+    assert.equal(crm.calls.created.length, 1);
+    assert.equal(crm.calls.created[0].full_name, '+919876543210',
+      'the number stands in for the name the CRM requires');
+    assert.equal(crm.calls.created[0].phone, '+919876543210');
+    assert.equal(repo.leads.held().length, 0);
+    assert.match(wa.sent[0].text, /Lead created/);
+  });
+
+  test('a name arriving later replaces the placeholder', async () => {
+    makeGroup();
+    const crm = fakeCrm();
+    const o = new Orchestrator({ crm, whatsapp: fakeWhatsApp() });
+    const msg = incoming({ text: 'New lead @919812345678\n9876543210' });
+    await o.handle(msg);
+
+    await o.handle(incoming({
+      text: 'Name: Priya Sharma', mentions: [], quotedId: msg.id
+    }));
+
+    assert.deepEqual(crm.calls.updated.at(-1).fields, { full_name: 'Priya Sharma' });
   });
 });
 

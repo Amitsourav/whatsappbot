@@ -144,9 +144,6 @@ class Orchestrator {
           name: result.name, phone: result.phone, mentionedPhone: lead.mentioned_phone
         });
         break;
-      case 'no_name':
-        reply = replies.needsName({ phone: result.phone });
-        break;
       default:
         return;
     }
@@ -181,8 +178,13 @@ class Orchestrator {
     repo.leads.recordAttempt(lead.id);
 
     try {
+      // The CRM requires a name, but the phone number is what identifies a lead.
+      // Showing the number is honest and searchable; a reply carrying "Name: X"
+      // replaces it later.
+      const displayName = lead.name || lead.phone;
+
       const { lead: created, deferred } = await this.crm.createLead({
-        full_name: lead.name,
+        full_name: displayName,
         phone: lead.phone,
         assigned_agent_id: employee.crm_profile_id,
         ...result.fields
