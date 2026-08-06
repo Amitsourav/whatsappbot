@@ -229,6 +229,55 @@ function findCourse(text, institution) {
 }
 
 /**
+ * Infer the fields that can be recognised without a label.
+ *
+ * Shared by new leads and replies. It previously ran only on new messages, so
+ * "Bharath University Chennai" filled the university field when it arrived in the
+ * first message but went to notes when it arrived as a reply — the same text
+ * treated two different ways.
+ *
+ * Only closed vocabularies are used: money markers, institution words, course
+ * names. Nothing here guesses at free text.
+ *
+ * @param {string} text
+ * @param {Object} [have] - fields already set by an explicit label, which win
+ * @returns {{ fields: Object, consumed: string[] }} `consumed` lists the lines
+ *   claimed, so they are not repeated in the remark.
+ */
+function inferFields(text, have = {}) {
+  const fields = {};
+  const consumed = [];
+
+  if (!have.loan_amount) {
+    const money = amount.findInLines(text);
+    if (money) {
+      fields.loan_amount = money;
+      for (const line of String(text).split('\n')) {
+        if (amount.detect(line.trim()).isAmount) consumed.push(line.trim());
+      }
+    }
+  }
+
+  if (!have.university) {
+    const institution = findInstitution(text);
+    if (institution) {
+      fields.university = institution;
+      consumed.push(institution);
+    }
+  }
+
+  if (!have.target_degree) {
+    const course = findCourse(text, fields.university || have.university);
+    if (course) {
+      fields.target_degree = course;
+      consumed.push(course);
+    }
+  }
+
+  return { fields, consumed };
+}
+
+/**
  * Classify an incoming group message.
  *
  * @param {{ text: string|null, mentions: string[] }} message
@@ -272,32 +321,13 @@ function classify(message) {
   const parsed = labelParser.parse(text);
   const name = extractName(text);
 
-  // Money is the one thing inferred without a label — see amount.js.
-  if (!parsed.fields.loan_amount) {
-    const found = amount.findInLines(text);
-    if (found) parsed.fields.loan_amount = found;
-  }
-
-  // An institution names itself: a line containing "University", "College" and
-  // the like cannot be a person, and needs no guessing to place.
-  if (!parsed.fields.university) {
-    const institution = findInstitution(text);
-    if (institution) parsed.fields.university = institution;
-  }
-
-  // Same reasoning for courses — a closed vocabulary, not free text.
-  if (!parsed.fields.target_degree) {
-    const course = findCourse(text, parsed.fields.university);
-    if (course) parsed.fields.target_degree = course;
-  }
+  const inferred = inferFields(text, parsed.fields);
+  Object.assign(parsed.fields, inferred.fields);
 
   // Everything that is not a recognised field becomes remark text, so the
   // original wording survives alongside the structured data.
   const remarkParts = [
-    ...parsed.plain.filter((line) =>
-      !amount.detect(line).isAmount
-      && line !== parsed.fields.university
-      && line !== parsed.fields.target_degree),
+    ...parsed.plain.filter((line) => !inferred.consumed.includes(line)),
     ...parsed.rejected.map((r) => `${r.label}: ${r.value}`)
   ];
 
@@ -320,5 +350,5 @@ function classify(message) {
 
 module.exports = {
   classify, extractName, looksLikeName, stripMentionsAndPhones,
-  findInstitution, findCourse
+  findInstitution, findCourse, inferFields
 };

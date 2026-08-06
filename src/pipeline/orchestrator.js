@@ -338,11 +338,18 @@ class Orchestrator {
     }
 
     const parsed = labelParser.parse(text);
+
+    // The same inference a new lead gets. Without this, "Bharath University
+    // Chennai" filled the university field in a first message but landed in notes
+    // when it arrived as a reply.
+    const inferred = detect.inferFields(text, parsed.fields);
+    Object.assign(parsed.fields, inferred.fields);
+
     const hasFields = Object.keys(parsed.fields).length > 0;
 
     // Anything not understood is preserved verbatim (R11.5).
     const remarkParts = [
-      ...parsed.plain,
+      ...parsed.plain.filter((line) => !inferred.consumed.includes(line)),
       ...parsed.rejected.map((r) => `${r.label}: ${r.value}`)
     ];
 

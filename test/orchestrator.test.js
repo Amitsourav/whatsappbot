@@ -547,3 +547,59 @@ describe('gap recovery', () => {
     assert.equal(crm.calls.created.length, 1);
   });
 });
+
+describe('a reply fills fields the same way a first message does', () => {
+  async function withParent(o) {
+    const msg = incoming();
+    await o.handle(msg);
+    return msg.id;
+  }
+
+  test('an unlabelled reply sets university and loan, not just notes', async () => {
+    // Seen live: replying "10 Lacs / Bharath University Chennai" to a lead put
+    // both into notes, while the identical text in a FIRST message filled the
+    // fields. Same words, two different outcomes.
+    makeGroup();
+    const crm = fakeCrm();
+    const o = new Orchestrator({ crm, whatsapp: fakeWhatsApp() });
+    const parentId = await withParent(o);
+
+    await o.handle(incoming({
+      text: '10 Lacs\n\nBharath University Chennai',
+      mentions: [], quotedId: parentId
+    }));
+
+    assert.deepEqual(crm.calls.updated.at(-1).fields, {
+      loan_amount: '10 Lakh',
+      university: 'Bharath University Chennai'
+    });
+  });
+
+  test('text claimed by a field is not repeated in the notes', async () => {
+    makeGroup();
+    const crm = fakeCrm();
+    const o = new Orchestrator({ crm, whatsapp: fakeWhatsApp() });
+    const parentId = await withParent(o);
+    const before = crm.calls.remarks.length;
+
+    await o.handle(incoming({
+      text: '10 Lacs\nBharath University Chennai',
+      mentions: [], quotedId: parentId
+    }));
+
+    assert.equal(crm.calls.remarks.length, before, 'nothing left over to note');
+  });
+
+  test('a reply the bot cannot place still becomes a note', async () => {
+    makeGroup();
+    const crm = fakeCrm();
+    const o = new Orchestrator({ crm, whatsapp: fakeWhatsApp() });
+    const parentId = await withParent(o);
+
+    await o.handle(incoming({
+      text: 'he will call back after 6', mentions: [], quotedId: parentId
+    }));
+
+    assert.match(crm.calls.remarks.at(-1).text, /call back after 6/);
+  });
+});
