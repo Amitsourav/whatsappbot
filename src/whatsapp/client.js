@@ -39,6 +39,20 @@ const RECONNECT_MAX_MS = 15_000;
 /** After this long connected, treat the next drop as a fresh incident. */
 const STABLE_AFTER_MS = 60_000;
 
+/**
+ * Liveness watchdog.
+ *
+ * A Baileys socket can report "open" while silently receiving nothing — seen live
+ * on 2026-08-06, when the bot sat "connected" for eleven minutes, missed a lead
+ * entirely, and resumed the moment it was forced to reconnect. A clean disconnect
+ * is recoverable; this is not, because nothing looks wrong.
+ *
+ * So the connection is probed rather than trusted.
+ */
+const WATCHDOG_INTERVAL_MS = 120_000;
+const PROBE_TIMEOUT_MS = 20_000;
+const FAILURES_BEFORE_RECONNECT = 2;
+
 /** Sending guard (S3): a hard ceiling so a bug can never flood a group. */
 /** Participant lists change rarely; one round trip per group per 10 minutes. */
 const LID_CACHE_TTL_MS = 10 * 60_000;
@@ -63,6 +77,8 @@ class WhatsAppClient extends EventEmitter {
     this.ownMessageIds = new Set();
     /** groupId -> { map: Map<lid, e164>, at: number } — see resolveLids(). */
     this.lidCache = new Map();
+    this.watchdog = null;
+    this.probeFailures = 0;
   }
 
   get connected() {
@@ -162,6 +178,8 @@ class WhatsAppClient extends EventEmitter {
       this.disconnectedAt = null;
       this.selfPhone = this.sock.user?.id?.split(':')[0] || null;
 
+      this.startWatchdog();
+
       if (wasReconnecting) {
         const seconds = Math.round(gapMs / 1000);
         // A long gap is where leads go missing, so say so plainly rather than
@@ -180,6 +198,7 @@ class WhatsAppClient extends EventEmitter {
     }
 
     if (connection === 'close') {
+      this.stopWatchdog();
       const statusCode = lastDisconnect?.error?.output?.statusCode;
       const loggedOut = statusCode === DisconnectReason.loggedOut;
 
@@ -212,6 +231,65 @@ class WhatsAppClient extends EventEmitter {
       logger.warn(`Disconnected (${statusCode ?? 'unknown'}) — reconnecting in ${Math.round(delay / 1000)}s`);
       this.emit('disconnected', { statusCode, attempt: this.reconnectAttempts });
       setTimeout(() => this.connect(options).catch((e) => logger.error(e.message)), delay);
+    }
+  }
+
+  /**
+   * Probe the connection periodically and force a reconnect if it has gone quiet.
+   * @private
+   */
+  startWatchdog() {
+    if (this.watchdog) return;
+    this.probeFailures = 0;
+
+    this.watchdog = setInterval(async () => {
+      if (this.state !== 'connected' || !this.sock) return;
+
+      try {
+        // A real round trip to WhatsApp. If the socket is a zombie this hangs,
+        // which the timeout turns into a failure.
+        await Promise.race([
+          this.sock.query({
+            tag: 'iq',
+            attrs: { to: '@s.whatsapp.net', type: 'get', xmlns: 'w:p' },
+            content: [{ tag: 'ping', attrs: {} }]
+          }),
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('probe timed out')), PROBE_TIMEOUT_MS))
+        ]);
+        this.probeFailures = 0;
+      } catch (error) {
+        this.probeFailures += 1;
+        logger.warn(`Connection probe failed (${this.probeFailures}/`
+          + `${FAILURES_BEFORE_RECONNECT}): ${error.message}`);
+
+        if (this.probeFailures >= FAILURES_BEFORE_RECONNECT) {
+          logger.error('Connection is alive but not responding — forcing a reconnect.');
+          logger.error('Messages during this period may have been missed.');
+          this.probeFailures = 0;
+          this.forceReconnect();
+        }
+      }
+    }, WATCHDOG_INTERVAL_MS);
+
+    this.watchdog.unref?.();
+  }
+
+  /** @private */
+  stopWatchdog() {
+    if (this.watchdog) clearInterval(this.watchdog);
+    this.watchdog = null;
+  }
+
+  /**
+   * Drop the socket so the normal reconnect path takes over.
+   * @private
+   */
+  forceReconnect() {
+    try {
+      this.sock?.end(new Error('watchdog: connection unresponsive'));
+    } catch {
+      // If ending it fails, the close handler still fires.
     }
   }
 
@@ -365,6 +443,7 @@ class WhatsAppClient extends EventEmitter {
 
   async disconnect() {
     this.stopping = true;
+    this.stopWatchdog();
     if (this.sock) {
       try {
         this.sock.end();
