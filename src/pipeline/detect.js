@@ -53,6 +53,18 @@ const BANK_MENTION = new RegExp(
  */
 const INSTITUTION_WORDS = /\b(universit(y|ies)|colleges?|institutes?|institution|vidyalaya|academy|polytechnic|schools?|iit|nit|iiit|aiims|nift|vit|srm|amity|manipal)\b/i;
 
+/**
+ * Course and degree names.
+ *
+ * A closed vocabulary, like the bank list — "BDS", "MBBS", "btech" are not things
+ * people are called, so recognising them is not the guess that free text would be.
+ *
+ * Deliberately excludes the short ambiguous ones (BE, BA, MA, MS): they appear
+ * inside ordinary words and names often enough that the cost of a wrong match
+ * outweighs the field being filled.
+ */
+const COURSE_WORDS = /\b(b\.?tech|m\.?tech|mba|bba|mbbs|bds|mds|b\.?sc|m\.?sc|bca|mca|llb|llm|ph\.?d|b\.?com|m\.?com|bachelors?|masters?|diploma|nursing|pharmacy|b\.?pharm|m\.?pharm|bpt|mpt|bhms|bams|bams|ug|pg)\b/i;
+
 /** A plausible human name: letters and common name punctuation, 2–60 chars. */
 const NAME_SHAPE = /^[\p{L}][\p{L}\s.'-]{1,59}$/u;
 
@@ -72,6 +84,7 @@ function looksLikeName(line) {
   if (/\d/.test(trimmed)) return false;
   if (INSTITUTION_WORDS.test(trimmed)) return false;
   if (BANK_MENTION.test(trimmed)) return false;
+  if (COURSE_WORDS.test(trimmed)) return false;
   if (!NAME_SHAPE.test(trimmed)) return false;
 
   // "call him tomorrow" is a sentence, not a name. Names are rarely 5+ words.
@@ -144,6 +157,28 @@ function findInstitution(text) {
 }
 
 /**
+ * Find a line naming a course.
+ *
+ * Skips the line already taken as the institution, so "Gla mathura BDS" does not
+ * end up in both fields.
+ *
+ * @param {string} text
+ * @param {string} [institution] - a line already claimed
+ * @returns {string|null}
+ */
+function findCourse(text, institution) {
+  for (const line of stripMentionsAndPhones(text).split('\n')) {
+    const trimmed = line.trim().replace(/[.,;]+$/, '');
+    if (!trimmed || trimmed.length > 60 || trimmed === institution) continue;
+    if (/^[A-Za-z%][A-Za-z\s%]{0,29}?\s*[:=\-–—]\s*\S/.test(trimmed)) continue;
+    if (!COURSE_WORDS.test(trimmed)) continue;
+    if (trimmed.split(/\s+/).length > 6) continue;
+    return trimmed;
+  }
+  return null;
+}
+
+/**
  * Classify an incoming group message.
  *
  * @param {{ text: string|null, mentions: string[] }} message
@@ -200,11 +235,19 @@ function classify(message) {
     if (institution) parsed.fields.university = institution;
   }
 
+  // Same reasoning for courses — a closed vocabulary, not free text.
+  if (!parsed.fields.target_degree) {
+    const course = findCourse(text, parsed.fields.university);
+    if (course) parsed.fields.target_degree = course;
+  }
+
   // Everything that is not a recognised field becomes remark text, so the
   // original wording survives alongside the structured data.
   const remarkParts = [
     ...parsed.plain.filter((line) =>
-      !amount.detect(line).isAmount && line !== parsed.fields.university),
+      !amount.detect(line).isAmount
+      && line !== parsed.fields.university
+      && line !== parsed.fields.target_degree),
     ...parsed.rejected.map((r) => `${r.label}: ${r.value}`)
   ];
 
@@ -226,5 +269,6 @@ function classify(message) {
 }
 
 module.exports = {
-  classify, extractName, looksLikeName, stripMentionsAndPhones, findInstitution
+  classify, extractName, looksLikeName, stripMentionsAndPhones,
+  findInstitution, findCourse
 };

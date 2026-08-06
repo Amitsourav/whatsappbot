@@ -1,0 +1,102 @@
+const { test, describe } = require('node:test');
+const assert = require('node:assert');
+const detect = require('../src/pipeline/detect');
+
+/**
+ * Every message shape actually posted in the group, with the result we want.
+ *
+ * This is the regression suite that matters most: it is not invented examples but
+ * the real thing, and each entry was added because the parser once got it wrong or
+ * because it is a shape we must not break.
+ *
+ * Numbers and names are as posted — this is the owner's own team's traffic.
+ */
+const MENTION = '+918796222415';
+
+const CASES = [
+  {
+    label: 'phone only',
+    text: '97179 34641\n\n@x',
+    want: { phone: '+919717934641', name: null }
+  },
+  {
+    label: 'phone then name',
+    text: '97417 40808\nZaid \n\n@x',
+    want: { phone: '+919741740808', name: 'Zaid' }
+  },
+  {
+    label: 'institution on its own line, no name anywhere',
+    // Was filed as the lead's NAME, leaving the university field empty.
+    text: '6290 690 498\n\nSRM University \n\nListed in PNB Bank \n\n@x',
+    want: { phone: '+916290690498', name: null, university: 'SRM University' }
+  },
+  {
+    label: 'name, college, course and amount',
+    text: '90075 70563\nGanpati Podder\n\n8 Lacs\n\nIDST college\n\nBDS course\n\n@x',
+    want: {
+      phone: '+919007570563', name: 'Ganpati Podder',
+      university: 'IDST college', target_degree: 'BDS course', loan_amount: '8 Lakh'
+    }
+  },
+  {
+    label: 'amount spelled "lkh"',
+    text: '98718 48226\nRaghav \n\nCourse level 7 bachelors \n30 lkh \n\n@x',
+    want: { name: 'Raghav', loan_amount: '30 Lakh' }
+  },
+  {
+    label: 'course with a country',
+    text: '93540 83384\nJitender Baghel \n\nBachelors in Australia \n\n@x',
+    want: { name: 'Jitender Baghel', target_degree: 'Bachelors in Australia' }
+  },
+  {
+    label: 'initials as a name',
+    text: '63634 29113\nANR\n\nMBBS India \n\n50 Lacs \n\n@x',
+    want: { name: 'ANR', target_degree: 'MBBS India', loan_amount: '50 Lakh' }
+  },
+  {
+    label: 'name and number on one line',
+    text: '8178261030 Sunil Bohet\n@x',
+    want: { phone: '+918178261030', name: 'Sunil Bohet' }
+  },
+  {
+    label: 'a status line, not a lead detail',
+    // "Existing lead." was being read as the person's name.
+    text: '78668 78035\n\nExisting lead. \n\nWhoever the counsellor is please call',
+    want: { phone: '+917866878035', name: null }
+  },
+  {
+    label: 'unlabelled multi-field lead',
+    text: 'jaanvi dixit \ndilip dixit \n84334 85292\nLaction Agra \nGla mathura \nbtech \n7 Lakhs\n\n@x',
+    want: {
+      phone: '+918433485292', name: 'jaanvi dixit',
+      target_degree: 'btech', loan_amount: '7 Lakh'
+    }
+  }
+];
+
+describe('real messages from the group', () => {
+  for (const { label, text, want } of CASES) {
+    test(label, () => {
+      const got = detect.classify({ text, mentions: [MENTION] });
+      for (const [field, expected] of Object.entries(want)) {
+        const actual = field in got ? got[field] : got.fields[field];
+        assert.deepEqual(actual ?? null, expected,
+          `${field}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
+      }
+    });
+  }
+
+  test('a person is never given an institution or course as their name', () => {
+    for (const line of ['SRM University', 'IDST college', 'BDS course', 'MBBS India',
+                        'Listed in PNB Bank', 'SBI rejected', 'Existing lead']) {
+      assert.equal(detect.looksLikeName(line), false, `"${line}" must not be a name`);
+    }
+  });
+
+  test('real names still pass', () => {
+    for (const line of ['Ganpati Podder', 'Jitender Baghel', 'Sunil Bohet',
+                        'jaanvi dixit', 'Raghav', 'Prince', 'R. K. Sharma']) {
+      assert.equal(detect.looksLikeName(line), true, `"${line}" must be a name`);
+    }
+  });
+});
