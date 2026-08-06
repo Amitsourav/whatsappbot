@@ -25,9 +25,19 @@ const logger = require('../logger');
 const { normalise, toMentionJids } = require('./messages');
 const { fromJid: phoneFromJid } = require('../pipeline/phone');
 
-/** Reconnect backoff, capped so a long outage doesn't become an hour-long wait. */
-const RECONNECT_BASE_MS = 2000;
-const RECONNECT_MAX_MS = 60_000;
+/**
+ * Reconnect backoff.
+ *
+ * Kept short deliberately. A message that arrives while we are disconnected is
+ * gone — WhatsApp does not replay it once the gap is long enough — so waiting
+ * politely between attempts costs leads. A 15s ceiling means the worst case is a
+ * 15-second hole rather than a minute.
+ */
+const RECONNECT_BASE_MS = 1000;
+const RECONNECT_MAX_MS = 15_000;
+
+/** After this long connected, treat the next drop as a fresh incident. */
+const STABLE_AFTER_MS = 60_000;
 
 /** Sending guard (S3): a hard ceiling so a bug can never flood a group. */
 /** Participant lists change rarely; one round trip per group per 10 minutes. */
@@ -46,6 +56,8 @@ class WhatsAppClient extends EventEmitter {
     this.selfPhone = null;
     this.reconnectAttempts = 0;
     this.stopping = false;
+    this.connectedAt = null;
+    this.disconnectedAt = null;
     this.sendTimestamps = [];
     /** Message IDs we sent ourselves, so we can ignore them (S1). */
     this.ownMessageIds = new Set();
@@ -100,9 +112,13 @@ class WhatsAppClient extends EventEmitter {
     }
 
     this.state = hasSession ? 'connecting' : 'awaiting_scan';
-    logger.info(hasSession
-      ? 'Restoring saved WhatsApp session'
-      : 'No saved session — link the number to continue');
+
+    if (!hasSession) {
+      logger.info('No saved session — link the number to continue');
+    } else if (this.reconnectAttempts === 0) {
+      logger.info('Restoring saved WhatsApp session');
+    }
+    // A reconnect is silent here; onConnectionUpdate reports the outcome.
   }
 
   /**
@@ -135,12 +151,29 @@ class WhatsAppClient extends EventEmitter {
     }
 
     if (connection === 'open') {
+      const wasReconnecting = this.reconnectAttempts > 0;
+      const gapMs = this.disconnectedAt ? Date.now() - this.disconnectedAt : 0;
+
       this.state = 'connected';
       this.qrDataUrl = null;
       this.pairingCode = null;
       this.reconnectAttempts = 0;
+      this.connectedAt = Date.now();
+      this.disconnectedAt = null;
       this.selfPhone = this.sock.user?.id?.split(':')[0] || null;
-      logger.info(`WhatsApp connected as ${this.selfPhone}`);
+
+      if (wasReconnecting) {
+        const seconds = Math.round(gapMs / 1000);
+        // A long gap is where leads go missing, so say so plainly rather than
+        // reporting a reconnect as if nothing happened.
+        const report = seconds > 30 ? logger.warn : logger.info;
+        report(`WhatsApp reconnected after ${seconds}s offline`);
+        if (seconds > 30) {
+          logger.warn('Messages sent during that gap may not have been received.');
+        }
+      } else {
+        logger.info(`WhatsApp connected as ${this.selfPhone}`);
+      }
       this.emit('status', this.status());
       this.emit('ready');
       return;
@@ -163,12 +196,21 @@ class WhatsAppClient extends EventEmitter {
 
       if (this.stopping) return;
 
+      if (!this.disconnectedAt) this.disconnectedAt = Date.now();
+
+      // A drop after a long healthy stretch is a new incident, not a continuing
+      // failure — restarting the backoff keeps the common case fast.
+      if (this.connectedAt && Date.now() - this.connectedAt > STABLE_AFTER_MS) {
+        this.reconnectAttempts = 0;
+      }
+
       this.reconnectAttempts += 1;
       const delay = Math.min(
         RECONNECT_BASE_MS * 2 ** (this.reconnectAttempts - 1),
         RECONNECT_MAX_MS
       );
       logger.warn(`Disconnected (${statusCode ?? 'unknown'}) — reconnecting in ${Math.round(delay / 1000)}s`);
+      this.emit('disconnected', { statusCode, attempt: this.reconnectAttempts });
       setTimeout(() => this.connect(options).catch((e) => logger.error(e.message)), delay);
     }
   }
