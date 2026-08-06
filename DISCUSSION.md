@@ -342,3 +342,33 @@ human can reassign.
 
 **Q6/Q9 detail:** the lead is held, not discarded, and appears in the admin panel so
 it cannot be forgotten.
+
+### Topic: What else the bot could do from WhatsApp
+
+With admin CRM access and a group the team already lives in, several things become
+possible. Seven were put forward; the owner chose four.
+
+**Agreed — recorded in `docs/PLANNED-FEATURES.md`:**
+
+1. **Daily summary** — yesterday's leads by person, plus the ones still untouched.
+   The untouched half is the valuable part: a lead nobody called is money already
+   lost, and nobody is watching for that today.
+2. **"My leads"** — a counsellor asks, gets their own pipeline back.
+3. **Follow-up reminders** — the CRM holds `due_date` and nothing surfaces it
+   where the team works.
+4. **Reassignment** — moving a lead to someone else from the group.
+
+**Not taken up:** stage changes from WhatsApp. A mistyped word would move a real
+record, and the CRM gates stage transitions anyway.
+
+**On reassignment,** which is the only one that writes to someone's work: the
+original rule (never reassign) is right for the accidental case and wrong for the
+deliberate one. It will require an explicit word rather than a bare tag — people
+tag each other constantly in conversation — and must announce both sides of the
+move so the person losing the lead sees it. Built last, once the read-only
+features have earned trust in the group.
+
+**Shared groundwork identified:** a real scheduler (the retry worker is an
+interval, not a clock), a rule for what counts as a command versus ordinary
+conversation, and the discipline that a summary saying "0 leads" every morning
+trains people to ignore the bot.
