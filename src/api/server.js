@@ -43,6 +43,17 @@ function createServer({ whatsapp, crm, orchestrator }) {
   const app = express();
   app.use(express.json({ limit: '256kb' }));
 
+  // ---- health -------------------------------------------------------------
+  // Unauthenticated, for the platform's deploy check. Deliberately says nothing
+  // about the CRM, the number, or the data.
+  app.get('/health', (req, res) => {
+    res.json({
+      ok: true,
+      whatsapp: whatsapp.state,
+      uptime: Math.floor(process.uptime())
+    });
+  });
+
   // ---- auth ---------------------------------------------------------------
   app.post('/api/auth/login', (req, res) => {
     const { username, password } = req.body || {};
