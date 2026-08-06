@@ -100,3 +100,48 @@ describe('real messages from the group', () => {
     }
   });
 });
+
+describe('things that describe a lead are never its name', () => {
+  // Every entry here was found being read as a person's name.
+  const NOT_PEOPLE = [
+    'Sanctioned already', 'Docs pending', 'File login', 'Not interested',
+    'Number switch off', 'Wrong number', 'DNP', 'Offer letter received',
+    'Visa applied', 'Fees paid', 'Collateral yes', 'Second time',
+    'Father farmer', 'Mother housewife', 'Co applicant father',
+    'September intake', 'Fall 2026', 'Referred by Ankit', 'Website lead',
+    'Location Agra', 'Laction Agra', 'Bihar', 'Delhi NCR',
+    'Chandigarh University', 'IIT Delhi', 'Amity Noida', 'Delhi Public School'
+  ];
+
+  for (const line of NOT_PEOPLE) {
+    test(`"${line}"`, () => {
+      assert.equal(detect.looksLikeName(line), false);
+    });
+  }
+});
+
+describe('real names survive the filtering', () => {
+  const PEOPLE = [
+    'Ganpati Podder', 'jaanvi dixit', 'Sunil Bohet', 'Anshu Raj', 'Raghav',
+    'Prince', 'ANR', 'R. K. Sharma', "D'Souza Maria", 'Md Arif', 'Sri Lakshmi',
+    'Abhishek Dabas', 'Ajoy Dhar', 'Vikash', 'Hari', 'Insha', 'Zaid',
+    'Jitender Baghel', 'Priya', 'Mohammed Salim Khan'
+  ];
+
+  for (const line of PEOPLE) {
+    test(`"${line}"`, () => {
+      assert.equal(detect.looksLikeName(line), true);
+    });
+  }
+});
+
+describe('known limit: an institution with no marker word', () => {
+  test('is indistinguishable from a name, and is documented as such', () => {
+    // "Gla mathura" and "Lovely Professional" are two capitalised words with
+    // nothing to separate them from a person. No rule can catch these — they need
+    // either a label from the sender or an AI reading the message. Asserted here
+    // so the limitation is visible rather than forgotten.
+    assert.equal(detect.looksLikeName('Gla mathura'), true);
+    assert.equal(detect.looksLikeName('Lovely Professional'), true);
+  });
+});

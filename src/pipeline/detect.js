@@ -65,6 +65,55 @@ const INSTITUTION_WORDS = /\b(universit(y|ies)|colleges?|institutes?|institution
  */
 const COURSE_WORDS = /\b(b\.?tech|m\.?tech|mba|bba|mbbs|bds|mds|b\.?sc|m\.?sc|bca|mca|llb|llm|ph\.?d|b\.?com|m\.?com|bachelors?|masters?|diploma|nursing|pharmacy|b\.?pharm|m\.?pharm|bpt|mpt|bhms|bams|bams|ug|pg)\b/i;
 
+/**
+ * Vocabulary that marks a line as describing the lead rather than naming them.
+ *
+ * Built from what the team actually writes: loan status, documents, family,
+ * places, timing, and where the lead came from. Every one of these was seen
+ * being read as a person's name.
+ *
+ * Closed vocabularies only — the same rule used for banks and courses. Nothing
+ * here is a plausible Indian given name, which is what keeps real names safe.
+ */
+const NOT_PERSON = new RegExp('\\b(' + [
+  // Loan and application status
+  'sanction(ed|ing)?', 'disburs(ed|ement)', 'log(ged)?[\\s-]?in', 'login',
+  'process(ing|ed)?', 'qualified', 'dnp', 'lost', 'won', 'approved', 'rejected',
+  'pending', 'collected', 'submitted', 'applied', 'apply', 'eligible',
+  'interested', 'reachable', 'available', 'switch(ed)?[\\s-]?off', 'busy',
+  'followup', 'follow[\\s-]?up', 'callback', 'call[\\s-]?back', 'closed',
+  'wrong', 'invalid', 'numbers?', 'mobiles?', 'first[\\s-]?time',
+  'second[\\s-]?time', 'third[\\s-]?time', 'times?',
+  // Documents and finance
+  'docs?', 'documents?', 'offer[\\s-]?letter', 'visa', 'cas', 'deposit',
+  'fees?', 'salary', 'income', 'itr', 'pan', 'aadhaar', 'aadhar', 'cibil',
+  'collateral', 'cosigner', 'co[\\s-]?signer', 'co[\\s-]?applicant', 'guarantor',
+  'property', 'security', 'margin',
+  // Family
+  'father', 'mother', 'parents?', 'guardian', 'brother', 'sister', 'uncle',
+  'aunt', 'husband', 'wife', 'spouse', 'son', 'daughter', 'farmer', 'housewife',
+  'businessman', 'employee', 'retired',
+  // Timing
+  'intake', 'batch', 'session', 'semester', 'fall', 'spring', 'summer',
+  'january', 'february', 'march', 'april', 'june', 'july', 'august',
+  'september', 'october', 'november', 'december', 'sept', 'jan', 'feb',
+  // Where it came from
+  'website', 'referred', 'reference', 'walk[\\s-]?in', 'enquiry', 'inquiry',
+  'portal', 'facebook', 'instagram', 'google', 'justdial',
+  // Indian states and common cities
+  'delhi', 'ncr', 'mumbai', 'bangalore', 'bengaluru', 'chennai', 'kolkata',
+  'hyderabad', 'pune', 'ahmedabad', 'jaipur', 'lucknow', 'patna', 'agra',
+  'noida', 'gurgaon', 'gurugram', 'indore', 'bhopal', 'nagpur', 'surat',
+  'kanpur', 'ranchi', 'raipur', 'guwahati', 'chandigarh', 'mohali',
+  'bihar', 'punjab', 'haryana', 'gujarat', 'rajasthan', 'kerala', 'karnataka',
+  'maharashtra', 'odisha', 'assam', 'jharkhand', 'chhattisgarh', 'telangana',
+  'uttarakhand', 'himachal', 'goa', 'manipur', 'tripura', 'meghalaya',
+  // Study destinations
+  'australia', 'canada', 'germany', 'ireland', 'newzealand', 'zealand',
+  'auckland', 'london', 'usa', 'america', 'europe', 'dubai', 'singapore',
+  'malaysia', 'poland', 'france', 'italy', 'russia', 'georgia', 'kazakhstan'
+].join('|') + ')\\b', 'i');
+
 /** A plausible human name: letters and common name punctuation, 2–60 chars. */
 const NAME_SHAPE = /^[\p{L}][\p{L}\s.'-]{1,59}$/u;
 
@@ -85,6 +134,7 @@ function looksLikeName(line) {
   if (INSTITUTION_WORDS.test(trimmed)) return false;
   if (BANK_MENTION.test(trimmed)) return false;
   if (COURSE_WORDS.test(trimmed)) return false;
+  if (NOT_PERSON.test(trimmed)) return false;
   if (!NAME_SHAPE.test(trimmed)) return false;
 
   // "call him tomorrow" is a sentence, not a name. Names are rarely 5+ words.
