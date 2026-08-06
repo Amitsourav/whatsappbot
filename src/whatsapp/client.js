@@ -49,8 +49,8 @@ const STABLE_AFTER_MS = 60_000;
  *
  * So the connection is probed rather than trusted.
  */
-const WATCHDOG_INTERVAL_MS = 120_000;
-const PROBE_TIMEOUT_MS = 20_000;
+const WATCHDOG_INTERVAL_MS = 45_000;
+const PROBE_TIMEOUT_MS = 15_000;
 const FAILURES_BEFORE_RECONNECT = 2;
 
 /** Sending guard (S3): a hard ceiling so a bug can never flood a group. */
@@ -79,6 +79,8 @@ class WhatsAppClient extends EventEmitter {
     this.lidCache = new Map();
     this.watchdog = null;
     this.probeFailures = 0;
+    /** Set while a history replay is in flight, so it is not requested twice. */
+    this.recovering = false;
   }
 
   get connected() {
@@ -120,6 +122,10 @@ class WhatsAppClient extends EventEmitter {
     this.sock.ev.on('creds.update', saveCreds);
     this.sock.ev.on('connection.update', (u) => this.onConnectionUpdate(u, options));
     this.sock.ev.on('messages.upsert', (u) => this.onMessages(u));
+
+    // History requested via fetchMessageHistory comes back here, not as a normal
+    // message event.
+    this.sock.ev.on('messaging-history.set', (payload) => this.onHistory(payload));
 
     // Pairing code must be requested after the socket exists but before scanning.
     if (!hasSession && options.pairingPhone) {
@@ -181,6 +187,12 @@ class WhatsAppClient extends EventEmitter {
       this.startWatchdog();
 
       if (wasReconnecting) {
+        // Any reconnect means a window where messages could have been pushed to a
+        // dead line. Ask the phone to replay rather than hoping there was nothing.
+        this.emit('gap', { seconds: Math.round(gapMs / 1000) });
+      }
+
+      if (wasReconnecting) {
         const seconds = Math.round(gapMs / 1000);
         // A long gap is where leads go missing, so say so plainly rather than
         // reporting a reconnect as if nothing happened.
@@ -232,6 +244,57 @@ class WhatsAppClient extends EventEmitter {
       this.emit('disconnected', { statusCode, attempt: this.reconnectAttempts });
       setTimeout(() => this.connect(options).catch((e) => logger.error(e.message)), delay);
     }
+  }
+
+  /**
+   * Ask the phone to replay recent messages for a group.
+   *
+   * This is the recovery for a gap. WhatsApp will not tell us what we missed, but
+   * the primary phone still holds every message, and a linked device can request
+   * history from it. Replaying is safe because leads.wa_message_id is UNIQUE — a
+   * message already handled is silently ignored.
+   *
+   * @param {{ waGroupId: string, lastMessageId: string|null,
+   *           lastMessageTs: number|null, lastFromMe: boolean }} group
+   * @param {number} [count]
+   */
+  async requestHistory(group, count = 50) {
+    if (!this.connected || !group?.lastMessageId) return false;
+
+    try {
+      await this.sock.fetchMessageHistory(
+        count,
+        { remoteJid: group.waGroupId, id: group.lastMessageId, fromMe: Boolean(group.lastFromMe) },
+        group.lastMessageTs
+      );
+      logger.info(`Requested replay of up to ${count} messages for ${group.waGroupId}`);
+      return true;
+    } catch (error) {
+      logger.warn(`Could not request history: ${error.message}`);
+      return false;
+    }
+  }
+
+  /**
+   * Handle a replayed batch. Each message goes through the same path as a live
+   * one, so nothing is treated specially — deduplication does the rest.
+   * @private
+   */
+  onHistory({ messages }) {
+    if (!messages?.length) return;
+
+    let considered = 0;
+    for (const raw of messages) {
+      const message = normalise(raw);
+      if (!message || !message.isGroup) continue;
+      if (message.fromMe || this.ownMessageIds.has(message.id)) continue;
+
+      considered += 1;
+      this.prepareAndEmit(message, raw).catch((error) =>
+        logger.error(`Replayed message ${message.id} failed: ${error.message}`));
+    }
+
+    if (considered) logger.info(`Replayed ${considered} message(s) from history`);
   }
 
   /**

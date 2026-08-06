@@ -48,6 +48,14 @@ class Orchestrator {
 
       if (!group.is_active) return;
 
+      // The point to ask the phone to replay from after a gap. Recorded for every
+      // message we see, whether or not it turns out to be a lead.
+      repo.groups.setWatermark(message.groupId, {
+        id: message.id,
+        timestamp: message.timestamp,
+        fromMe: message.fromMe
+      });
+
       if (group.purpose === 'bank') {
         // Way 2 is not designed yet. Recorded rather than ignored, so when it is
         // built there is real data to build against.

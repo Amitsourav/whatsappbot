@@ -173,6 +173,21 @@ const MIGRATIONS = [
       CREATE INDEX idx_logs_id ON logs(id DESC);
     `
   }
+  ,{
+    name: '002_message_watermark',
+    sql: `
+      -- The last message we processed in each group.
+      --
+      -- After a gap, this is the point we ask the phone to replay from. A linked
+      -- device can request history from the primary phone, and because
+      -- leads.wa_message_id is UNIQUE, replaying a message we already handled is
+      -- a no-op. That makes aggressive re-fetching safe.
+      ALTER TABLE groups ADD COLUMN last_message_id TEXT;
+      ALTER TABLE groups ADD COLUMN last_message_ts INTEGER;
+      ALTER TABLE groups ADD COLUMN last_message_from_me INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE groups ADD COLUMN last_seen_at TEXT;
+    `
+  }
 ];
 
 module.exports = { MIGRATIONS };

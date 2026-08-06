@@ -69,6 +69,21 @@ async function main() {
   // through so replies can quote it.
   whatsapp.on('message', (message, raw) => orchestrator.handle(message, raw));
 
+  // A reconnect means there was a window where WhatsApp may have pushed messages
+  // to a connection that was no longer listening. It will not tell us what we
+  // missed, so we ask the phone to replay from the last message we recorded.
+  whatsapp.on('gap', async ({ seconds }) => {
+    for (const group of repo.groups.active()) {
+      if (!group.last_message_id) continue;
+      await whatsapp.requestHistory({
+        waGroupId: group.wa_group_id,
+        lastMessageId: group.last_message_id,
+        lastMessageTs: group.last_message_ts,
+        lastFromMe: Boolean(group.last_message_from_me)
+      }, seconds > 120 ? 100 : 30);
+    }
+  });
+
   whatsapp.on('ready', async () => {
     try {
       const groups = await whatsapp.listGroups();

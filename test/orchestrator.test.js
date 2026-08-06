@@ -68,6 +68,7 @@ const incoming = (over = {}) => ({
   text: 'New lead @919812345678\nPriya Sharma\n9876543210',
   mentions: [RAHUL_WA],
   quotedId: null,
+  timestamp: 1754400000,
   ...over
 });
 
@@ -502,5 +503,47 @@ describe('duplicate reply shows where the lead stands', () => {
     assert.doesNotMatch(wa.sent[0].text, /University:/);
     assert.doesNotMatch(wa.sent[0].text, /Loan:/);
     assert.match(wa.sent[0].text, /Stage: Created/);
+  });
+});
+
+describe('gap recovery', () => {
+  test('a watermark is recorded for every message, lead or not', async () => {
+    // This is the point the phone is asked to replay from after a gap. It must be
+    // set even for messages that are not leads, or a gap after a run of chatter
+    // would replay from far too far back.
+    makeGroup();
+    const o = new Orchestrator({ crm: fakeCrm(), whatsapp: fakeWhatsApp() });
+
+    await o.handle(incoming({ id: 'MSG-CHAT', text: 'good morning', mentions: [] }));
+
+    const g = repo.groups.byWaId('120363999@g.us');
+    assert.equal(g.last_message_id, 'MSG-CHAT');
+    assert.ok(g.last_message_ts, 'timestamp must be stored for the replay request');
+  });
+
+  test('the watermark never moves backwards', async () => {
+    // Replayed messages arrive out of order and are older than what we already
+    // have; letting them rewind the watermark would replay the same window
+    // forever.
+    makeGroup();
+    const o = new Orchestrator({ crm: fakeCrm(), whatsapp: fakeWhatsApp() });
+
+    await o.handle(incoming({ id: 'NEW', text: 'hi', mentions: [], timestamp: 2000 }));
+    await o.handle(incoming({ id: 'OLD', text: 'hi', mentions: [], timestamp: 1000 }));
+
+    assert.equal(repo.groups.byWaId('120363999@g.us').last_message_id, 'NEW');
+  });
+
+  test('replaying a message already handled creates nothing', async () => {
+    // What makes aggressive re-fetching safe.
+    makeGroup();
+    const crm = fakeCrm();
+    const o = new Orchestrator({ crm, whatsapp: fakeWhatsApp() });
+    const msg = incoming();
+
+    await o.handle(msg);
+    await o.handle(msg);   // as if replayed from history
+
+    assert.equal(crm.calls.created.length, 1);
   });
 });

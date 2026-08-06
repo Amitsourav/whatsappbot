@@ -46,6 +46,20 @@ const groups = {
     `).run(enabled ? 1 : 0, id);
   },
 
+  /**
+   * Remember the newest message seen in a group — the point to replay from after
+   * a gap.
+   */
+  setWatermark(waGroupId, { id, timestamp, fromMe }) {
+    get().prepare(`
+      UPDATE groups
+      SET last_message_id = ?, last_message_ts = ?, last_message_from_me = ?,
+          last_seen_at = datetime('now')
+      WHERE wa_group_id = ?
+        AND (last_message_ts IS NULL OR last_message_ts <= ?)
+    `).run(id, timestamp, fromMe ? 1 : 0, waGroupId, timestamp);
+  },
+
   setPurpose(id, purpose) {
     get().prepare(`
       UPDATE groups
