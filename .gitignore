@@ -19,3 +19,7 @@ web/dist/
 
 # OS
 .DS_Store
+
+# Local backups of .env — never commit
+.env.backup*
+.env.*.backup
