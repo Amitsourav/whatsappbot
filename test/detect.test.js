@@ -140,3 +140,44 @@ describe('classify — structured fields and remark text', () => {
     assert.deepEqual(r.extraPhones, ['+919812345670']);
   });
 });
+
+describe('institutions and situation lines (from live messages)', () => {
+  test('a university is not a person, and fills the university field', () => {
+    // Seen live: "SRM University" was filed as the lead's NAME, and the
+    // university field left empty. The keyword makes this unambiguous.
+    const r = detect.classify({
+      text: '6290 690 498\n\nSRM University \n\nListed in PNB Bank \n\n@x',
+      mentions: [RAHUL]
+    });
+    assert.equal(r.name, null, 'must not be used as a name');
+    assert.equal(r.fields.university, 'SRM University');
+    assert.equal(r.phone, '+916290690498');
+  });
+
+  test('a line about a bank is not a person either', () => {
+    assert.equal(detect.extractName('9876543210\nListed in PNB Bank'), null);
+    assert.equal(detect.extractName('9876543210\nSBI rejected'), null);
+  });
+
+  test('name, institution and amount together', () => {
+    const r = detect.classify({
+      text: '9007570563\nGanpati Podder\nIDST college\nBDS course\n8 Lacs',
+      mentions: [RAHUL]
+    });
+    assert.equal(r.name, 'Ganpati Podder');
+    assert.equal(r.fields.university, 'IDST college');
+    assert.equal(r.fields.loan_amount, '8 Lakh');
+  });
+
+  test('a sentence mentioning a college is not the college name', () => {
+    // It belongs in remarks, where a human reads it whole.
+    assert.equal(
+      detect.findInstitution('he studied at SRM University last year and wants to go abroad'),
+      null
+    );
+  });
+
+  test('a real name is still found', () => {
+    assert.equal(detect.extractName('98718 48226\nRaghav'), 'Raghav');
+  });
+});

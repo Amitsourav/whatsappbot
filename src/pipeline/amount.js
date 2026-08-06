@@ -13,7 +13,7 @@
  */
 
 /** A number, then an Indian magnitude word. "7 lakh", "1.5cr", "15L". */
-const WITH_UNIT = /^(?:₹|rs\.?|inr)?\s*(\d+(?:[.,]\d+)?)\s*(lakhs?|lacs?|l|crores?|cr|k|thousand)\b\.?$/i;
+const WITH_UNIT = /^(?:₹|rs\.?|inr)?\s*(\d+(?:[.,]\d+)?)\s*(lakhs?|lacs?|lkhs?|lakcs?|lc|l|crores?|crs?|cr|k|thousand)\b\.?$/i;
 
 /** A currency marker with digits. "₹7,00,000", "Rs 700000". */
 const WITH_CURRENCY = /^(?:₹|rs\.?|inr)\s*([\d,]+(?:\.\d+)?)$/i;
@@ -24,7 +24,8 @@ const GROUPED = /^(\d{1,3}(?:,\d{2})+,\d{3})$/;
 /** Normalised unit names, for a tidy stored value. */
 const UNITS = {
   l: 'Lakh', lakh: 'Lakh', lakhs: 'Lakh', lac: 'Lakh', lacs: 'Lakh',
-  cr: 'Cr', crore: 'Cr', crores: 'Cr',
+  lkh: 'Lakh', lkhs: 'Lakh', lakc: 'Lakh', lakcs: 'Lakh', lc: 'Lakh',
+  cr: 'Cr', crore: 'Cr', crores: 'Cr', crs: 'Cr',
   k: 'K', thousand: 'K'
 };
 

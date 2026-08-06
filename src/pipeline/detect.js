@@ -11,6 +11,7 @@
  */
 const phoneUtil = require('./phone');
 const labelParser = require('./labels');
+const { LOCKED_LISTS } = require('../crm/fields');
 const amount = require('./amount');
 
 /** Words that are never a person's name, even on a line of their own. */
@@ -23,8 +24,34 @@ const NOT_A_NAME = new Set([
   // person's name and would have reached the CRM as one.
   'existing', 'existing lead', 'old lead', 'old', 'repeat', 'repeat lead',
   'duplicate', 'already shared', 'shared', 'reshared', 'again', 'same lead',
-  'whoever', 'anyone', 'someone', 'counsellor', 'counselor'
+  'whoever', 'anyone', 'someone', 'counsellor', 'counselor',
+  // Lines that describe the lead's situation. A line opening with any of these
+  // is a statement, not a person: "Listed in PNB Bank", "Applied last week".
+  'listed', 'applied', 'going', 'wants', 'want', 'needs', 'need', 'looking',
+  'interested', 'studying', 'studied', 'completed', 'pursuing', 'planning',
+  'got', 'has', 'have', 'taken', 'took', 'sent', 'submitted', 'done',
+  'from', 'at', 'in', 'for', 'with', 'via', 'through', 'ref', 'reference'
 ]);
+
+/**
+ * A line naming a bank describes the lead's situation — where it went, who
+ * rejected it — not who the person is. Built from the CRM's own bank list so the
+ * two never drift apart, plus the generic word itself.
+ */
+const BANK_MENTION = new RegExp(
+  `\\b(banks?|${LOCKED_LISTS.bank_name.map((b) => b.replace(/\s+/g, '\\s+')).join('|')})\\b`,
+  'i'
+);
+
+/**
+ * Words that mark a line as an institution rather than a person.
+ *
+ * Seen live: "SRM University" was filed as the lead's NAME and the university
+ * field was left empty. The keyword makes this unambiguous — no person is called
+ * "… University" — so it is safe to both reject it as a name and use it as the
+ * institution, without the guessing that plain text would require.
+ */
+const INSTITUTION_WORDS = /\b(universit(y|ies)|colleges?|institutes?|institution|vidyalaya|academy|polytechnic|schools?|iit|nit|iiit|aiims|nift|vit|srm|amity|manipal)\b/i;
 
 /** A plausible human name: letters and common name punctuation, 2–60 chars. */
 const NAME_SHAPE = /^[\p{L}][\p{L}\s.'-]{1,59}$/u;
@@ -43,6 +70,8 @@ function looksLikeName(line) {
   // not a name.
   if (NOT_A_NAME.has(lower.split(/\s+/)[0])) return false;
   if (/\d/.test(trimmed)) return false;
+  if (INSTITUTION_WORDS.test(trimmed)) return false;
+  if (BANK_MENTION.test(trimmed)) return false;
   if (!NAME_SHAPE.test(trimmed)) return false;
 
   // "call him tomorrow" is a sentence, not a name. Names are rarely 5+ words.
@@ -87,6 +116,30 @@ function extractName(text) {
     if (looksLikeName(trimmed)) return trimmed.replace(/[.,;:]+$/, '');
   }
 
+  return null;
+}
+
+/**
+ * Find a line that names an institution.
+ *
+ * Only a short line that is essentially just the institution counts — "SRM
+ * University" yes, "he studied at SRM University last year and wants to apply
+ * abroad" no, because that sentence belongs in remarks where a human reads it
+ * whole.
+ *
+ * @param {string} text
+ * @returns {string|null}
+ */
+function findInstitution(text) {
+  for (const line of stripMentionsAndPhones(text).split('\n')) {
+    const trimmed = line.trim().replace(/[.,;]+$/, '');
+    if (!trimmed || trimmed.length > 60) continue;
+    if (/^[A-Za-z%][A-Za-z\s%]{0,29}?\s*[:=\-–—]\s*\S/.test(trimmed)) continue;
+    if (!INSTITUTION_WORDS.test(trimmed)) continue;
+    // A sentence mentioning a college is not a college name.
+    if (trimmed.split(/\s+/).length > 6) continue;
+    return trimmed;
+  }
   return null;
 }
 
@@ -140,10 +193,18 @@ function classify(message) {
     if (found) parsed.fields.loan_amount = found;
   }
 
+  // An institution names itself: a line containing "University", "College" and
+  // the like cannot be a person, and needs no guessing to place.
+  if (!parsed.fields.university) {
+    const institution = findInstitution(text);
+    if (institution) parsed.fields.university = institution;
+  }
+
   // Everything that is not a recognised field becomes remark text, so the
   // original wording survives alongside the structured data.
   const remarkParts = [
-    ...parsed.plain.filter((line) => !amount.detect(line).isAmount),
+    ...parsed.plain.filter((line) =>
+      !amount.detect(line).isAmount && line !== parsed.fields.university),
     ...parsed.rejected.map((r) => `${r.label}: ${r.value}`)
   ];
 
@@ -164,4 +225,6 @@ function classify(message) {
   };
 }
 
-module.exports = { classify, extractName, looksLikeName, stripMentionsAndPhones };
+module.exports = {
+  classify, extractName, looksLikeName, stripMentionsAndPhones, findInstitution
+};
