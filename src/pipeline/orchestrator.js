@@ -367,11 +367,92 @@ class Orchestrator {
   }
 
   /**
+   * Move a lead to someone else.
+   *
+   * The one place the bot changes who owns existing work, so every step is
+   * explicit: an unambiguous instruction, a check that the lead is still open,
+   * a loud announcement naming both sides, and a permanent record in the CRM.
+   *
+   * @private
+   */
+  async handleReassign(instruction, message, parent, group, rawMessage) {
+    const refuse = (reason, extra = {}) => this.send(group, replies.reassignRefused({
+      reason, name: parent.name, phone: parent.phone, ...extra
+    }), rawMessage);
+
+    if (instruction.error) return refuse(instruction.error);
+    if (!parent.crm_lead_id) return refuse('not_a_lead');
+
+    const target = repo.employees.byPhone(instruction.to);
+    if (!target) return refuse('unknown_employee');
+
+    const lead = await this.crm.getLead(parent.crm_lead_id).catch(() => null);
+    if (!lead) return refuse('not_a_lead');
+
+    // A finished lead should be reopened deliberately, not moved sideways.
+    if (CrmClient.isTerminal(lead)) {
+      return refuse('closed', { stage: lead.current_stage });
+    }
+
+    if (lead.assigned_agent_id === target.crm_profile_id) {
+      return refuse('same_person');
+    }
+
+    const fromName = this.crm.users?.get(lead.assigned_agent_id)?.full_name || null;
+    const byName = message.senderPhone
+      ? (repo.employees.byPhone(message.senderPhone)?.name || message.senderPhone)
+      : null;
+
+    try {
+      await this.crm.updateLead(parent.crm_lead_id, {
+        assigned_agent_id: target.crm_profile_id
+      });
+
+      await this.crm.addRemark(
+        parent.crm_lead_id,
+        `Reassigned from ${fromName || 'unassigned'} to ${target.name}`
+          + (byName ? ` by ${byName}` : '') + ' via WhatsApp',
+        message.id
+      ).catch((error) => logger.warn(`Reassign remark failed: ${error.message}`));
+
+      repo.leads.assign(parent.id, target.id, target.wa_phone);
+      repo.leads.markCreated(parent.id, parent.crm_lead_id);
+
+      logger.info(`Lead ${parent.phone} moved ${fromName || 'unassigned'} → ${target.name}`);
+
+      await this.send(group, replies.leadReassigned({
+        name: lead.full_name || parent.name,
+        phone: parent.phone,
+        from: fromName,
+        toPhone: target.wa_phone,
+        toName: target.name,
+        by: byName
+      }), rawMessage);
+    } catch (error) {
+      logger.error(`Reassign failed for ${parent.crm_lead_id}: ${error.message}`);
+      await this.send(group, replies.reassignRefused({
+        reason: 'failed', name: parent.name, phone: parent.phone
+      }), rawMessage);
+    }
+  }
+
+  /**
    * A reply to a known lead: field updates, remarks, or nothing at all.
    * @private
    */
   async handleReply(message, parent, group, rawMessage) {
     const text = message.text || '';
+
+    // Checked first: "assign @Zaid" is an instruction about the lead, not a
+    // detail to record on it.
+    const reassign = commands.parseReassign(text, message.mentions);
+    if (reassign) {
+      repo.skipped.record({
+        waMessageId: message.id, groupId: group.id, body: text,
+        reason: 'command_reassign', senderPhone: message.senderPhone
+      });
+      return await this.handleReassign(reassign, message, parent, group, rawMessage);
+    }
 
     // R11.1 — acknowledgements never reach the CRM, but are kept here so the
     // noise list can be corrected against how people actually talk.

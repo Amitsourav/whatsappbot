@@ -20,6 +20,44 @@ const COMMANDS = {
 };
 
 /**
+ * Words that mean "move this lead", when replying to one.
+ *
+ * An explicit word is required — a bare tag would be far too easy to trigger by
+ * accident, since people tag each other constantly in conversation. This is the
+ * single guard that makes reassignment safe.
+ */
+const REASSIGN_WORDS = /^\s*(assign|reassign|transfer|move|handover|hand over|give)\b/i;
+
+/**
+ * Identify a reassignment instruction on a reply.
+ *
+ * @param {string} text
+ * @param {string[]} mentions - resolved phone numbers
+ * @returns {{ to: string }|{ error: string }|null}
+ */
+function parseReassign(text, mentions = []) {
+  if (!text || !REASSIGN_WORDS.test(text)) return null;
+
+  // Length alone is not enough: "move to Canada next year is what he wants" is
+  // short and opens with a command word. What separates an instruction from a
+  // sentence is that almost nothing is left once the command word and the tag
+  // are removed.
+  const remainder = String(text)
+    .replace(REASSIGN_WORDS, '')
+    .replace(/@\d[\d \t-]{6,}/g, ' ')
+    .replace(/\b(to|this|it|lead|please|pls|now)\b/gi, ' ')
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .trim();
+
+  if (remainder.split(/\s+/).filter(Boolean).length > 2) return null;
+
+  if (mentions.length === 0) return { error: 'no_mention' };
+  if (mentions.length > 1) return { error: 'multiple_mentions' };
+
+  return { to: mentions[0] };
+}
+
+/**
  * Identify a command.
  *
  * @param {string} text
@@ -52,8 +90,9 @@ const HELP_TEXT = [
   '• Post a number with no tag → I tell you who already has it',
   '• Reply to a lead → I add the details to it',
   '• Type "my leads" → I list yours',
+  '• Reply "assign @name" on a lead → I move it to them',
   '',
   'For a field, write it plainly: University: Bharath Chennai'
 ].join('\n');
 
-module.exports = { parse, COMMANDS, HELP_TEXT };
+module.exports = { parse, parseReassign, COMMANDS, HELP_TEXT, REASSIGN_WORDS };

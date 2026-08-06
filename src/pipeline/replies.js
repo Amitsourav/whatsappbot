@@ -136,6 +136,36 @@ const replies = {
   },
 
   /**
+   * 9 — a lead was moved to someone else.
+   *
+   * Names both sides and who did it. Someone losing a lead they were working
+   * must see it happen, in the group, at the moment it happens.
+   */
+  leadReassigned({ name, phone, from, toPhone, by }) {
+    return {
+      text: `🔄 Lead moved\n${subject(name, phone)}\n`
+        + `${from || 'Unassigned'} → ${tag(toPhone)}`
+        + (by ? `   (by ${by})` : ''),
+      mentions: [toPhone].filter(Boolean)
+    };
+  },
+
+  /** 9b — the move could not be made, and why. */
+  reassignRefused({ reason, name, phone, stage }) {
+    const why = {
+      closed: `That lead is ${STAGE_LABELS[stage] || stage} — reopen it in the CRM first`,
+      unknown_employee: "I don't have that person in the employee list",
+      no_mention: 'Tag the person to move it to — assign @name',
+      multiple_mentions: 'Tag only one person',
+      not_a_lead: 'Reply to the lead you want to move',
+      same_person: 'That lead is already theirs'
+    }[reason] || 'I could not move that lead';
+
+    const who = (name || phone) ? `\n${subject(name, phone)}` : '';
+    return { text: `⚠️ ${why}${who}`, mentions: [] };
+  },
+
+  /**
    * 5 — a reply set one or more CRM fields.
    *
    * A replacement is shown differently from a first value. Someone overwriting a

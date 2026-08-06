@@ -72,6 +72,10 @@ const LABEL_FORBIDDEN = new Set([
   ...NEVER_SEND, 'phone', 'assigned_agent_id', 'pre_counsellor_id', 'lead_source_id'
 ]);
 
+// Note: assigned_agent_id is absent from NEVER_SEND on purpose. It is written
+// deliberately on create and by the reassign command, but LABEL_FORBIDDEN keeps
+// it out of reach of anything a person types as a field.
+
 /**
  * Maximum lengths. The CRM's DB enforces these but Pydantic does not mirror them,
  * so over-length input returns 500 rather than 422 (C12). We truncate first.

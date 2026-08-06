@@ -729,3 +729,128 @@ describe('commands', () => {
     assert.equal(wa.sent.length, 0, 'the bot must stay quiet');
   });
 });
+
+describe('reassignment', () => {
+  const ZAID_WA = '+919999888877';
+  const ZAID_CRM = 'crm-profile-zaid';
+
+  async function setup(overrides = {}) {
+    makeGroup();
+    repo.employees.upsert({
+      waPhone: ZAID_WA, crmProfileId: ZAID_CRM, name: 'Zaid Ansari'
+    });
+    const crm = fakeCrm(overrides);
+    crm.users = new Map([
+      [RAHUL_CRM, { id: RAHUL_CRM, full_name: 'Rahul Kumar' }],
+      [ZAID_CRM, { id: ZAID_CRM, full_name: 'Zaid Ansari' }]
+    ]);
+    crm.getLead = async (id) => ({
+      id,
+      full_name: 'Kiran',
+      current_stage: overrides.stage || 'processing',
+      assigned_agent_id: overrides.owner === undefined ? RAHUL_CRM : overrides.owner
+    });
+    const wa = fakeWhatsApp();
+    const o = new Orchestrator({ crm, whatsapp: wa });
+    const msg = incoming();
+    await o.handle(msg);
+    return { o, crm, wa, parentId: msg.id };
+  }
+
+  test('moves the lead and names both sides', async () => {
+    // Someone losing a lead they were working must see it happen, in the group.
+    const { o, crm, wa, parentId } = await setup();
+
+    await o.handle(incoming({
+      text: 'assign @919999888877', mentions: [ZAID_WA], quotedId: parentId
+    }));
+
+    assert.deepEqual(crm.calls.updated.at(-1).fields, { assigned_agent_id: ZAID_CRM });
+    assert.match(wa.sent.at(-1).text, /Lead moved/);
+    assert.match(wa.sent.at(-1).text, /Rahul Kumar → @919999888877/);
+  });
+
+  test('records the move in the CRM', async () => {
+    const { o, crm, parentId } = await setup();
+
+    await o.handle(incoming({
+      text: 'transfer @919999888877', mentions: [ZAID_WA], quotedId: parentId
+    }));
+
+    assert.match(crm.calls.remarks.at(-1).text,
+      /Reassigned from Rahul Kumar to Zaid Ansari/);
+  });
+
+  test('a bare tag does NOT move anything', async () => {
+    // People tag each other constantly. Without the explicit word this would be
+    // a silent handover every time someone was mentioned in a reply.
+    const { o, crm, parentId } = await setup();
+    const before = crm.calls.updated.length;
+
+    await o.handle(incoming({
+      text: '@919999888877', mentions: [ZAID_WA], quotedId: parentId
+    }));
+
+    assert.equal(crm.calls.updated.length, before, 'must not reassign');
+  });
+
+  test('a closed lead is refused, not moved sideways', async () => {
+    const { o, crm, wa, parentId } = await setup({ stage: 'disbursed' });
+    const before = crm.calls.updated.length;
+
+    await o.handle(incoming({
+      text: 'assign @919999888877', mentions: [ZAID_WA], quotedId: parentId
+    }));
+
+    assert.equal(crm.calls.updated.length, before);
+    assert.match(wa.sent.at(-1).text, /Disbursed/);
+  });
+
+  test('an unmapped person is refused', async () => {
+    const { o, crm, wa, parentId } = await setup();
+    const before = crm.calls.updated.length;
+
+    await o.handle(incoming({
+      text: 'assign @919111111111', mentions: ['+919111111111'], quotedId: parentId
+    }));
+
+    assert.equal(crm.calls.updated.length, before);
+    assert.match(wa.sent.at(-1).text, /employee list/);
+  });
+
+  test('moving it to whoever already has it does nothing', async () => {
+    const { o, crm, wa, parentId } = await setup({ owner: ZAID_CRM });
+    const before = crm.calls.updated.length;
+
+    await o.handle(incoming({
+      text: 'assign @919999888877', mentions: [ZAID_WA], quotedId: parentId
+    }));
+
+    assert.equal(crm.calls.updated.length, before);
+    assert.match(wa.sent.at(-1).text, /already theirs/);
+  });
+
+  test('tagging two people is refused rather than guessed', async () => {
+    const { o, crm, wa, parentId } = await setup();
+    const before = crm.calls.updated.length;
+
+    await o.handle(incoming({
+      text: 'assign @a @b', mentions: [ZAID_WA, RAHUL_WA], quotedId: parentId
+    }));
+
+    assert.equal(crm.calls.updated.length, before);
+    assert.match(wa.sent.at(-1).text, /only one person/);
+  });
+
+  test('an ordinary sentence opening with "move" is not an instruction', async () => {
+    const { o, crm, parentId } = await setup();
+    const before = crm.calls.updated.length;
+
+    await o.handle(incoming({
+      text: 'move to Canada next year is what he wants for his masters',
+      mentions: [ZAID_WA], quotedId: parentId
+    }));
+
+    assert.equal(crm.calls.updated.length, before);
+  });
+});
