@@ -18,7 +18,12 @@ const NOT_A_NAME = new Set([
   'new lead', 'lead', 'new', 'urgent', 'please', 'pls', 'sir', 'madam', 'mam',
   'hi', 'hello', 'hey', 'fyi', 'note', 'update', 'important', 'priority',
   'today', 'tomorrow', 'follow up', 'followup', 'call', 'contact', 'student',
-  'candidate', 'client', 'customer', 'enquiry', 'inquiry', 'query'
+  'candidate', 'client', 'customer', 'enquiry', 'inquiry', 'query',
+  // Things people write ABOUT a lead. Seen live: "Existing lead." was read as a
+  // person's name and would have reached the CRM as one.
+  'existing', 'existing lead', 'old lead', 'old', 'repeat', 'repeat lead',
+  'duplicate', 'already shared', 'shared', 'reshared', 'again', 'same lead',
+  'whoever', 'anyone', 'someone', 'counsellor', 'counselor'
 ]);
 
 /** A plausible human name: letters and common name punctuation, 2–60 chars. */

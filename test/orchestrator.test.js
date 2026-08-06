@@ -33,6 +33,9 @@ function fakeCrm(overrides = {}) {
       calls.remarks.push({ id, text, sourceId });
       return { id: 'remark-1' };
     },
+    async findByPhone() {
+      return overrides.existingByPhone || null;
+    },
     async getLead(id) {
       calls.fetched.push(id);
       return { id, current_stage: overrides.existingStage || 'contacted',
@@ -153,7 +156,7 @@ describe('new lead — the happy path', () => {
 });
 
 describe('leads that are held for a human', () => {
-  test('no mention → held and the group is asked to tag someone (Q6)', async () => {
+  test('no mention, number unknown → held and the group is asked to tag (Q6)', async () => {
     makeGroup();
     const crm = fakeCrm();
     const wa = fakeWhatsApp();
@@ -164,6 +167,31 @@ describe('leads that are held for a human', () => {
     assert.equal(crm.calls.created.length, 0, 'nothing should reach the CRM');
     assert.equal(repo.leads.held().length, 1, 'and nothing should be lost');
     assert.match(wa.sent[0].text, /Please tag the employee/);
+  });
+
+  test('no mention, but the number IS a lead → answer who owns it', async () => {
+    // A number posted with no tag is usually the question "who has this one?".
+    // Seen live: "78668 78035 / Existing lead. / Whoever the counsellor is please
+    // call" — the bot had the answer and said nothing useful.
+    makeGroup();
+    const crm = fakeCrm({
+      existingByPhone: {
+        id: 'known-lead', serial_no: 4211, full_name: 'Ganpati Podder',
+        current_stage: 'processing', assigned_agent_id: 'agent-9'
+      }
+    });
+    crm.users = new Map([['agent-9', { id: 'agent-9', full_name: 'Zaid Ansari' }]]);
+
+    const wa = fakeWhatsApp();
+    await new Orchestrator({ crm, whatsapp: wa }).handle(
+      incoming({ text: '78668 78035\nExisting lead.', mentions: [] })
+    );
+
+    assert.match(wa.sent[0].text, /Already in the CRM/);
+    assert.match(wa.sent[0].text, /Counsellor: Zaid Ansari/, 'the question actually asked');
+    assert.match(wa.sent[0].text, /Stage: Processing/);
+    assert.equal(crm.calls.created.length, 0, 'must not create anything');
+    assert.equal(repo.leads.recent()[0].status, 'existing');
   });
 
   test('two mentions → held with both names (Q9)', async () => {

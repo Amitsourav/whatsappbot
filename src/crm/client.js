@@ -224,6 +224,33 @@ class CrmClient {
   }
 
   /**
+   * Find a lead by phone number.
+   *
+   * Search is substring ILIKE, not exact, and can return several rows (C5). A full
+   * ten-digit number is a precise enough needle in practice, but more than one
+   * match is treated as ambiguous rather than guessed at.
+   *
+   * @param {string} phone - E.164
+   * @returns {Promise<object|null>} the single match, or null if none or ambiguous
+   */
+  async findByPhone(phone) {
+    if (!phone) return null;
+    const national = String(phone).replace(/^\+91/, '');
+
+    const result = await this.request('GET', `/leads/search?q=${encodeURIComponent(national)}`)
+      .catch(() => null);
+    if (!result) return null;
+
+    const rows = Array.isArray(result) ? result : (result.items || result.leads || []);
+    const exact = rows.filter((r) => {
+      const stored = String(r.phone || '').replace(/\D/g, '');
+      return stored.endsWith(national);
+    });
+
+    return exact.length === 1 ? exact[0] : null;
+  }
+
+  /**
    * Read a lead.
    * @param {string} leadId
    * @returns {Promise<object>}

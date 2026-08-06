@@ -129,9 +129,33 @@ class Orchestrator {
     let reply;
 
     switch (lead.held_reason) {
-      case 'no_mention':
+      case 'no_mention': {
+        // A number posted with no tag is usually a question — "who has this one?"
+        // Answering it is more useful than asking them to tag someone, and the
+        // lookup is read-only.
+        const existing = await this.crm.findByPhone(result.phone).catch(() => null);
+
+        if (existing) {
+          repo.leads.markExisting(lead.id, existing.id);
+          await this.crm.addRemark(
+            existing.id,
+            `Shared again in WhatsApp by ${lead.sender_phone || 'a team member'}`
+              + `\n\n${lead.raw_message}`,
+            lead.wa_message_id
+          ).catch(() => {});
+
+          reply = replies.leadExists({
+            name: result.name,
+            phone: result.phone,
+            lead: existing,
+            resolveUser: (id) => (id ? this.crm.users?.get(id)?.full_name : null)
+          });
+          break;
+        }
+
         reply = replies.needsMention({ name: result.name, phone: result.phone });
         break;
+      }
       case 'multiple_mentions': {
         const names = result.mentions.map(
           (p) => repo.employees.byPhone(p)?.name || p
