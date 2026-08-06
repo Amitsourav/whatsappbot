@@ -697,14 +697,16 @@ describe('commands', () => {
     assert.equal(crm.calls.created.length, 0, 'a command must never create a lead');
   });
 
-  test('someone not in the employee list is told how to fix it', async () => {
+  test('someone not in the employee list is ignored, not answered', async () => {
+    // They have no leads to show, and explaining that to every non-counsellor in
+    // the group would just be noise.
     makeGroup();
     const wa = fakeWhatsApp();
     await new Orchestrator({ crm: fakeCrm(), whatsapp: wa }).handle(incoming({
       text: 'my leads', mentions: [], senderPhone: '+919999999999'
     }));
 
-    assert.match(wa.sent[0].text, /employee list/);
+    assert.equal(wa.sent.length, 0, 'the bot must stay quiet');
   });
 
   test('a command is never mistaken for a lead', async () => {

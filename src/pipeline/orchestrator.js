@@ -110,14 +110,10 @@ class Orchestrator {
         ? repo.employees.byPhone(message.senderPhone)
         : null;
 
-      if (!employee) {
-        await this.send(group, {
-          text: '⚠️ I don\'t have you in the employee list yet — '
-            + 'add your number in the admin panel and try again',
-          mentions: []
-        }, rawMessage);
-        return;
-      }
+      // Someone not in the employee map is ignored, not answered. They have no
+      // leads to show, and telling every non-employee how to add themselves would
+      // just be noise in a group where most people are not counsellors.
+      if (!employee) return;
 
       const result = await buildMyLeads(this.crm, employee.crm_profile_id)
         .catch((error) => {
