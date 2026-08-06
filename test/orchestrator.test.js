@@ -38,8 +38,12 @@ function fakeCrm(overrides = {}) {
     },
     async getLead(id) {
       calls.fetched.push(id);
-      return { id, current_stage: overrides.existingStage || 'contacted',
-               full_name: overrides.existingName || 'Priya S' };
+      return {
+        id,
+        current_stage: overrides.existingStage || 'contacted',
+        full_name: overrides.existingName || 'Priya S',
+        ...(overrides.currentFields || {})
+      };
     }
   };
 }
@@ -601,5 +605,74 @@ describe('a reply fills fields the same way a first message does', () => {
     }));
 
     assert.match(crm.calls.remarks.at(-1).text, /call back after 6/);
+  });
+});
+
+describe('replacing a value that is already there', () => {
+  async function withParent(o) {
+    const msg = incoming();
+    await o.handle(msg);
+    return msg.id;
+  }
+
+  test('an empty field is simply set', async () => {
+    makeGroup();
+    const crm = fakeCrm({ currentFields: { university: null } });
+    const wa = fakeWhatsApp();
+    const o = new Orchestrator({ crm, whatsapp: wa });
+    const parentId = await withParent(o);
+
+    await o.handle(incoming({
+      text: 'Bharath University Chennai', mentions: [], quotedId: parentId
+    }));
+
+    assert.match(wa.sent.at(-1).text, /✅ University → Bharath University Chennai/);
+  });
+
+  test('replacing a value is announced, not done silently', async () => {
+    // Overwriting a counsellor's entry without saying so is how people stop
+    // trusting the bot.
+    makeGroup();
+    const crm = fakeCrm({ currentFields: { university: 'GLA Mathura' } });
+    const wa = fakeWhatsApp();
+    const o = new Orchestrator({ crm, whatsapp: wa });
+    const parentId = await withParent(o);
+
+    await o.handle(incoming({
+      text: 'Bharath University Chennai', mentions: [], quotedId: parentId
+    }));
+
+    assert.match(wa.sent.at(-1).text, /GLA Mathura → Bharath University Chennai/);
+  });
+
+  test('the replaced value is kept as a note', async () => {
+    // A correction must never destroy what was there.
+    makeGroup();
+    const crm = fakeCrm({ currentFields: { university: 'GLA Mathura' } });
+    const o = new Orchestrator({ crm, whatsapp: fakeWhatsApp() });
+    const parentId = await withParent(o);
+
+    await o.handle(incoming({
+      text: 'Bharath University Chennai', mentions: [], quotedId: parentId
+    }));
+
+    assert.match(crm.calls.remarks.at(-1).text,
+      /university changed from "GLA Mathura" to "Bharath University Chennai"/);
+  });
+
+  test('writing the same value again does nothing at all', async () => {
+    makeGroup();
+    const crm = fakeCrm({ currentFields: { university: 'GLA Mathura' } });
+    const wa = fakeWhatsApp();
+    const o = new Orchestrator({ crm, whatsapp: wa });
+    const parentId = await withParent(o);
+    const before = crm.calls.updated.length;
+
+    await o.handle(incoming({
+      text: 'GLA Mathura', mentions: [], quotedId: parentId
+    }));
+
+    assert.equal(crm.calls.updated.length, before, 'no pointless write');
+    assert.equal(wa.sent.length, 1, 'and no pointless reply');
   });
 });

@@ -381,12 +381,37 @@ class Orchestrator {
     repo.leadUpdates.recordAttempt(record.id);
 
     try {
-      if (Object.keys(parsed.fields).length) {
-        await this.crm.updateLead(parent.crm_lead_id, parsed.fields);
+      // Read before writing, so a value replacing another can be reported and
+      // kept. Overwriting a counsellor's entry silently is how trust is lost.
+      const current = Object.keys(parsed.fields).length
+        ? await this.crm.getLead(parent.crm_lead_id).catch(() => null)
+        : null;
+
+      const changes = [];
+      const toWrite = {};
+
+      for (const [field, value] of Object.entries(parsed.fields)) {
+        const from = current ? current[field] : undefined;
+        // Writing a value that is already there is noise in the audit trail.
+        if (from !== undefined && from !== null && String(from) === String(value)) continue;
+        toWrite[field] = value;
+        changes.push({ field, from: from || null, to: value });
       }
 
-      if (remarkParts.length) {
-        await this.crm.addRemark(parent.crm_lead_id, remarkParts.join('\n'),
+      if (Object.keys(toWrite).length) {
+        await this.crm.updateLead(parent.crm_lead_id, toWrite);
+      }
+
+      // Anything replaced is recorded, so a correction never destroys history.
+      const replaced = changes.filter((c) => c.from);
+      const notes = [...remarkParts];
+      if (replaced.length) {
+        notes.push(...replaced.map((c) =>
+          `${c.field} changed from "${c.from}" to "${c.to}"`));
+      }
+
+      if (notes.length) {
+        await this.crm.addRemark(parent.crm_lead_id, notes.join('\n'),
           record.wa_message_id);
       }
 
@@ -395,8 +420,8 @@ class Orchestrator {
       if (group && !record.replied) {
         // Confirm what landed, and explain what did not — this is how the team
         // learns the labelled format (R9).
-        if (Object.keys(parsed.fields).length) {
-          await this.send(group, replies.fieldsUpdated(parsed.fields), rawMessage,
+        if (changes.length) {
+          await this.send(group, replies.fieldsUpdated(changes), rawMessage,
             () => repo.leadUpdates.markReplied(record.id));
         }
 

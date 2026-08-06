@@ -135,12 +135,23 @@ const replies = {
     };
   },
 
-  /** 5 — a reply set one or more CRM fields. */
-  fieldsUpdated(updates) {
+  /**
+   * 5 — a reply set one or more CRM fields.
+   *
+   * A replacement is shown differently from a first value. Someone overwriting a
+   * counsellor's entry should see that they did, in the group, immediately —
+   * silently swapping it is how people stop trusting the bot.
+   *
+   * @param {{field: string, from: *, to: *}[]} changes
+   */
+  fieldsUpdated(changes) {
     return {
-      text: Object.entries(updates)
-        .map(([field, value]) => `✅ ${LABELS[field] || field} → ${format(value)}`)
-        .join('\n'),
+      text: changes.map(({ field, from, to }) => {
+        const label = LABELS[field] || field;
+        return from
+          ? `✏️ ${label}: ${format(from)} → ${format(to)}`
+          : `✅ ${label} → ${format(to)}`;
+      }).join('\n'),
       mentions: []
     };
   },
