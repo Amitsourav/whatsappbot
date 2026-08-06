@@ -15,7 +15,7 @@ const { WhatsAppClient } = require('./whatsapp/client');
 const { Orchestrator } = require('./pipeline/orchestrator');
 const { RetryWorker } = require('./pipeline/worker');
 const { DailyScheduler } = require('./pipeline/scheduler');
-const { buildDailySummary } = require('./pipeline/digest');
+const { buildMorningMessage } = require('./pipeline/digest');
 const { createServer } = require('./api/server');
 
 async function main() {
@@ -137,9 +137,9 @@ async function main() {
         return;
       }
 
-      const summary = await buildDailySummary(crm);
+      const summary = await buildMorningMessage(crm);
       if (!summary) {
-        logger.info('No leads yesterday — no summary posted');
+        logger.info('Nothing to report this morning — no message posted');
         return;
       }
 
@@ -148,8 +148,8 @@ async function main() {
         await whatsapp.reply({ groupId: group.wa_group_id, text: summary.text });
       }
 
-      logger.info(`Daily summary posted: ${summary.leads} lead(s), `
-        + `${summary.untouched} untouched`);
+      logger.info(`Morning message posted: ${summary.leads} lead(s), `
+        + `${summary.untouched} untouched, ${summary.due} follow-up(s)`);
     }
   });
   digest.start();

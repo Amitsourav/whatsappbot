@@ -19,6 +19,16 @@ const UNTOUCHED_STAGES = new Set(['created']);
 const MAX_LISTED = 8;
 
 /**
+ * How far back an overdue follow-up is still worth chasing.
+ *
+ * The live CRM carries 570 overdue leads, most of them long past. Listing eight
+ * arbitrary ones from that pile every morning is noise, and noise is how a bot
+ * gets ignored. Recently overdue is a thing someone can act on today; six months
+ * overdue is a data-hygiene problem, not a reminder.
+ */
+const OVERDUE_WINDOW_DAYS = 7;
+
+/**
  * The date N days ago in the display timezone, as YYYY-MM-DD.
  * @param {number} daysAgo
  * @returns {string}
@@ -98,6 +108,127 @@ async function buildDailySummary(crm, options = {}) {
   return { text: lines.join('\n'), leads: leads.length, untouched: untouched.length };
 }
 
+/**
+ * Follow-ups due today or already overdue.
+ *
+ * `due_date` is not a filter the API supports, so a window of recently created
+ * leads is fetched and filtered here. Ninety days covers the realistic set — a
+ * lead created a year ago with a follow-up due today is rare enough not to be
+ * worth fetching ten thousand records for.
+ *
+ * @param {import('../crm/client').CrmClient} crm
+ * @param {{ today?: string, windowDays?: number }} [options]
+ * @returns {Promise<{due: object[], overdue: object[]}>}
+ */
+async function findFollowUps(crm, options = {}) {
+  const today = options.today || dateKey(0);
+  const windowDays = options.windowDays ?? 90;
+
+  const rows = await crm.listLeads({ date_from: dateKey(windowDays) }, 30);
+
+  const cutoff = options.overdueFrom
+    || dateKey(options.overdueWindowDays ?? OVERDUE_WINDOW_DAYS);
+
+  const due = [];
+  const overdue = [];
+  let olderCount = 0;
+
+  for (const lead of rows) {
+    if (!lead.due_date) continue;
+    // A finished lead is not owed a follow-up.
+    if (['disbursed', 'lost', 'enrolled'].includes(lead.current_stage)) continue;
+
+    const day = String(lead.due_date).slice(0, 10);
+    if (day === today) due.push(lead);
+    else if (day < today && day >= cutoff) overdue.push(lead);
+    else if (day < cutoff) olderCount += 1;
+  }
+
+  return { due, overdue, olderCount };
+}
+
+/**
+ * Render the follow-up section of the morning message.
+ * @returns {string|null} null when nothing is due
+ */
+function renderFollowUps({ due, overdue, olderCount = 0 }, crm) {
+  if (!due.length && !overdue.length && !olderCount) return null;
+
+  const line = (lead) => {
+    const owner = crm.users?.get(lead.assigned_agent_id)?.full_name;
+    return `${prettyPhone(lead.phone)} · ${lead.full_name || '—'}`
+      + (owner ? ` · ${owner}` : '');
+  };
+
+  /**
+   * A short list is worth naming; a long one is not. Eight arbitrary rows out of
+   * a hundred and forty helps nobody — a count per person tells each of them
+   * exactly how much is theirs, and they can open their own list.
+   */
+  const section = (heading, rows) => {
+    if (!rows.length) return [];
+    if (rows.length <= MAX_LISTED) return [heading, ...rows.map(line)];
+
+    const byAgent = new Map();
+    for (const lead of rows) {
+      const name = crm.users?.get(lead.assigned_agent_id)?.full_name || 'Unassigned';
+      byAgent.set(name, (byAgent.get(name) || 0) + 1);
+    }
+    const counts = [...byAgent.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .map(([name, count]) => `${name} ${count}`)
+      .join(' · ');
+
+    return [heading, counts];
+  };
+
+  const out = [];
+  out.push(...section(`🔔 Due today (${due.length})`, due));
+
+  if (overdue.length) {
+    if (out.length) out.push('');
+    out.push(...section(`⏰ Overdue this week (${overdue.length})`, overdue));
+  }
+
+  if (olderCount) {
+    // Counted, never listed. It is a backlog to clean up, not today's work.
+    if (out.length) out.push('');
+    out.push(`📁 ${olderCount} older follow-ups still open`);
+  }
+
+  return out.join('\n');
+}
+
+/**
+ * The whole morning message: yesterday's summary and today's follow-ups.
+ *
+ * One message, not two — two posts every morning is how a bot becomes something
+ * people scroll past. Returns null when there is nothing to say at all.
+ *
+ * @param {import('../crm/client').CrmClient} crm
+ * @param {{ day?: string, today?: string }} [options]
+ * @returns {Promise<{text: string, leads: number, untouched: number, due: number}|null>}
+ */
+async function buildMorningMessage(crm, options = {}) {
+  const summary = await buildDailySummary(crm, options);
+  const followUps = await findFollowUps(crm, options).catch(() => ({ due: [], overdue: [] }));
+  const followUpText = renderFollowUps(followUps, crm);
+
+  if (!summary && !followUpText) return null;
+
+  const parts = [];
+  if (summary) parts.push(summary.text);
+  if (followUpText) parts.push(followUpText);
+
+  return {
+    text: parts.join('\n\n———\n\n'),
+    leads: summary?.leads ?? 0,
+    untouched: summary?.untouched ?? 0,
+    due: followUps.due.length + followUps.overdue.length,
+    older: followUps.olderCount || 0
+  };
+}
+
 /** "5 Aug" — short, since the message is read the next morning. */
 function formatDay(key) {
   const [y, m, d] = key.split('-').map(Number);
@@ -145,4 +276,7 @@ async function buildMyLeads(crm, profileId) {
   return { text: lines.join('\n'), count: open.length };
 }
 
-module.exports = { buildDailySummary, buildMyLeads, dateKey, leadDate };
+module.exports = {
+  buildDailySummary, buildMyLeads, buildMorningMessage,
+  findFollowUps, renderFollowUps, dateKey, leadDate
+};

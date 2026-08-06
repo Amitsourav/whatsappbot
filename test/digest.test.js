@@ -124,3 +124,111 @@ describe('daily scheduler', () => {
     assert.equal(ran, 1, 'the run is recorded before it executes');
   });
 });
+
+describe('follow-up reminders', () => {
+  const { findFollowUps, renderFollowUps, buildMorningMessage } = require('../src/pipeline/digest');
+
+  const dated = (due, over = {}) => lead({ due_date: due, ...over });
+
+  test('separates due today from overdue', async () => {
+    const crm = fakeCrm([
+      dated('2026-08-06T00:00:00Z', { full_name: 'Today One' }),
+      dated('2026-08-01T00:00:00Z', { full_name: 'Late One' }),
+      lead({ full_name: 'No date' })
+    ]);
+    const r = await findFollowUps(crm, { today: '2026-08-06' });
+
+    assert.equal(r.due.length, 1);
+    assert.equal(r.overdue.length, 1);
+    assert.equal(r.due[0].full_name, 'Today One');
+  });
+
+  test('a finished lead is not owed a follow-up', async () => {
+    const crm = fakeCrm([
+      dated('2026-08-01T00:00:00Z', { current_stage: 'disbursed' }),
+      dated('2026-08-01T00:00:00Z', { current_stage: 'lost' }),
+      dated('2026-08-01T00:00:00Z', { current_stage: 'processing' })
+    ]);
+    const r = await findFollowUps(crm, { today: '2026-08-06' });
+    assert.equal(r.overdue.length, 1);
+  });
+
+  test('a long list is summarised per person, not listed', async () => {
+    // Eight arbitrary rows out of a hundred and forty helps nobody. A count per
+    // person tells each of them how much is theirs.
+    const many = Array.from({ length: 20 }, (_, i) =>
+      dated('2026-08-06T00:00:00Z', {
+        full_name: `Lead ${i}`,
+        assigned_agent_id: i % 2 ? 'a1' : 'a2'
+      }));
+    const crm = fakeCrm(many);
+    const r = await findFollowUps(crm, { today: '2026-08-06' });
+    const text = renderFollowUps(r, crm);
+
+    assert.match(text, /Due today \(20\)/);
+    assert.match(text, /Ankit Dubey 10/);
+    assert.match(text, /Zaid Ansari 10/);
+    assert.doesNotMatch(text, /Lead 3/, 'individual leads must not be listed');
+  });
+
+  test('a long-overdue backlog is counted, never listed', async () => {
+    // The live CRM carries hundreds. Listing them every morning is noise, and
+    // noise is how a bot gets ignored.
+    const crm = fakeCrm([
+      dated('2026-01-01T00:00:00Z', { full_name: 'Ancient' }),
+      dated('2026-08-05T00:00:00Z', { full_name: 'Recent' })
+    ]);
+    const r = await findFollowUps(crm, { today: '2026-08-06', overdueFrom: '2026-08-01' });
+
+    assert.equal(r.overdue.length, 1, 'this week is actionable');
+    assert.equal(r.olderCount, 1, 'older is a backlog, only counted');
+
+    const text = renderFollowUps(r, crm);
+    assert.match(text, /1 older follow-ups still open/);
+    assert.doesNotMatch(text, /Ancient/);
+  });
+
+  test('nothing due produces no section at all', async () => {
+    const crm = fakeCrm([lead()]);
+    const r = await findFollowUps(crm, { today: '2026-08-06' });
+    assert.equal(renderFollowUps(r, crm), null);
+  });
+
+  test('names the owner so it reaches the right person', async () => {
+    const crm = fakeCrm([dated('2026-08-06T00:00:00Z', { full_name: 'Kiran' })]);
+    const r = await findFollowUps(crm, { today: '2026-08-06' });
+    assert.match(renderFollowUps(r, crm), /Kiran · Ankit Dubey/);
+  });
+});
+
+describe('the morning message', () => {
+  const { buildMorningMessage } = require('../src/pipeline/digest');
+
+  test('joins the summary and the follow-ups into one post', async () => {
+    // Two messages every morning is how a bot becomes something people scroll past.
+    const crm = fakeCrm([
+      lead({ created_at: '2026-08-05T06:00:00Z' }),
+      lead({ created_at: '2026-08-05T06:00:00Z', due_date: '2026-08-06T00:00:00Z' })
+    ]);
+    const m = await buildMorningMessage(crm, { day: '2026-08-05', today: '2026-08-06' });
+
+    assert.match(m.text, /2 leads/);
+    assert.match(m.text, /Due today/);
+    assert.equal(m.due, 1);
+  });
+
+  test('says nothing at all when there is nothing to say', async () => {
+    const m = await buildMorningMessage(fakeCrm([]), { day: '2026-08-05', today: '2026-08-06' });
+    assert.equal(m, null);
+  });
+
+  test('posts follow-ups even on a day with no new leads', async () => {
+    const crm = fakeCrm([
+      lead({ created_at: '2026-08-01T06:00:00Z', due_date: '2026-08-06T00:00:00Z' })
+    ]);
+    const m = await buildMorningMessage(crm, { day: '2026-08-05', today: '2026-08-06' });
+
+    assert.ok(m, 'a quiet day for new leads still has follow-ups worth posting');
+    assert.match(m.text, /Due today/);
+  });
+});
