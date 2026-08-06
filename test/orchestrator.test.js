@@ -676,3 +676,54 @@ describe('replacing a value that is already there', () => {
     assert.equal(wa.sent.length, 1, 'and no pointless reply');
   });
 });
+
+describe('commands', () => {
+  test('"my leads" answers the person who asked', async () => {
+    makeGroup();
+    const crm = fakeCrm();
+    crm.listLeads = async (f) => (f.current_stage === 'created'
+      ? [{ phone: '+919876543210', full_name: 'Kiran',
+           current_stage: 'created', assigned_agent_id: RAHUL_CRM }]
+      : []);
+    crm.users = new Map([[RAHUL_CRM, { id: RAHUL_CRM, full_name: 'Rahul Kumar' }]]);
+
+    const wa = fakeWhatsApp();
+    await new Orchestrator({ crm, whatsapp: wa }).handle(incoming({
+      text: 'my leads', mentions: [], senderPhone: RAHUL_WA
+    }));
+
+    assert.match(wa.sent[0].text, /Rahul Kumar — 1 open lead/);
+    assert.match(wa.sent[0].text, /Kiran/);
+    assert.equal(crm.calls.created.length, 0, 'a command must never create a lead');
+  });
+
+  test('someone not in the employee list is told how to fix it', async () => {
+    makeGroup();
+    const wa = fakeWhatsApp();
+    await new Orchestrator({ crm: fakeCrm(), whatsapp: wa }).handle(incoming({
+      text: 'my leads', mentions: [], senderPhone: '+919999999999'
+    }));
+
+    assert.match(wa.sent[0].text, /employee list/);
+  });
+
+  test('a command is never mistaken for a lead', async () => {
+    makeGroup();
+    const crm = fakeCrm();
+    await new Orchestrator({ crm, whatsapp: fakeWhatsApp() }).handle(incoming({
+      text: 'help', mentions: [], senderPhone: RAHUL_WA
+    }));
+    assert.equal(crm.calls.created.length, 0);
+  });
+
+  test('conversation that merely contains a command word is left alone', async () => {
+    makeGroup();
+    const crm = fakeCrm();
+    const wa = fakeWhatsApp();
+    await new Orchestrator({ crm, whatsapp: wa }).handle(incoming({
+      text: 'let me check my leads later', mentions: [], senderPhone: RAHUL_WA
+    }));
+
+    assert.equal(wa.sent.length, 0, 'the bot must stay quiet');
+  });
+});

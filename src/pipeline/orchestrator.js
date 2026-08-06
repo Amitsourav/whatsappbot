@@ -21,6 +21,8 @@ const noise = require('./noise');
 const labelParser = require('./labels');
 const { replies } = require('./replies');
 const { LOCKED_LISTS } = require('../crm/fields');
+const commands = require('./commands');
+const { buildMyLeads } = require('./digest');
 const { DuplicateLeadError, CrmClient } = require('../crm/client');
 const repo = require('../db/repositories');
 const logger = require('../logger');
@@ -67,6 +69,9 @@ class Orchestrator {
         return;
       }
 
+      const command = commands.parse(message.text);
+      if (command) return await this.handleCommand(command, message, group, rawMessage);
+
       if (message.quotedId) {
         const parent = repo.leads.byWaMessageId(message.quotedId);
         if (parent) return await this.handleReply(message, parent, group, rawMessage);
@@ -78,6 +83,52 @@ class Orchestrator {
       // A failure here must never take the connection down — staying connected
       // matters more than any single message.
       logger.error(`Pipeline error on ${message?.id}: ${error.stack || error.message}`);
+    }
+  }
+
+  /**
+   * Answer a command.
+   *
+   * Read-only, and the reply is always addressed to whoever asked — a command is
+   * a question from one person, not an announcement to the group.
+   *
+   * @private
+   */
+  async handleCommand(command, message, group, rawMessage) {
+    repo.skipped.record({
+      waMessageId: message.id, groupId: group.id, body: message.text || '',
+      reason: `command_${command.name}`, senderPhone: message.senderPhone
+    });
+
+    if (command.name === 'help') {
+      await this.send(group, { text: commands.HELP_TEXT, mentions: [] }, rawMessage);
+      return;
+    }
+
+    if (command.name === 'myLeads') {
+      const employee = message.senderPhone
+        ? repo.employees.byPhone(message.senderPhone)
+        : null;
+
+      if (!employee) {
+        await this.send(group, {
+          text: '⚠️ I don\'t have you in the employee list yet — '
+            + 'add your number in the admin panel and try again',
+          mentions: []
+        }, rawMessage);
+        return;
+      }
+
+      const result = await buildMyLeads(this.crm, employee.crm_profile_id)
+        .catch((error) => {
+          logger.warn(`my-leads failed for ${employee.name}: ${error.message}`);
+          return null;
+        });
+
+      await this.send(group, {
+        text: result ? result.text : '⚠️ Couldn\'t reach the CRM just now — try again shortly',
+        mentions: []
+      }, rawMessage);
     }
   }
 
