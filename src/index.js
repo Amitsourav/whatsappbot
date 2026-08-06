@@ -15,7 +15,7 @@ const { WhatsAppClient } = require('./whatsapp/client');
 const { Orchestrator } = require('./pipeline/orchestrator');
 const { RetryWorker } = require('./pipeline/worker');
 const { DailyScheduler } = require('./pipeline/scheduler');
-const { buildMorningMessage } = require('./pipeline/digest');
+const { buildMorningMessage, buildStageReport } = require('./pipeline/digest');
 const { createServer } = require('./api/server');
 
 async function main() {
@@ -154,6 +154,48 @@ async function main() {
   });
   digest.start();
 
+  // End-of-day login and PF report. Posted whether or not anything happened —
+  // a report that only appears on good days is not a report.
+  const stageReport = new DailyScheduler({
+    name: 'stage-report',
+    at: config.stageReport.at,
+    run: async () => {
+      if (repo.settings.get('sending_paused') === 'true') {
+        logger.info('Sending is paused — skipping the stage report');
+        return;
+      }
+
+      // Resolved from the live user list each time, so a renamed or re-created
+      // CRM account does not silently drop someone from the report.
+      const agents = config.stageReport.agents
+        .map((email) => [...(crm.users?.values() || [])]
+          .find((u) => u.email.toLowerCase() === email))
+        .filter(Boolean)
+        .map((u) => ({ id: u.id, name: u.full_name }));
+
+      const missing = config.stageReport.agents.length - agents.length;
+      if (missing > 0) {
+        logger.warn(`${missing} configured report agent(s) not found in the CRM`);
+      }
+      if (!agents.length) {
+        logger.error('No report agents resolved — stage report skipped');
+        return;
+      }
+
+      const report = await buildStageReport(crm, agents);
+      if (!report) return;
+
+      for (const group of repo.groups.active()) {
+        if (!group.send_enabled || group.purpose !== 'inhouse') continue;
+        await whatsapp.reply({ groupId: group.wa_group_id, text: report.text });
+      }
+
+      logger.info(`Stage report posted: ${report.totals.logged_in} login(s), `
+        + `${report.totals.pf_paid} PF`);
+    }
+  });
+  stageReport.start();
+
   // WhatsApp last, and non-blocking: if it fails, the panel is still up to fix it.
   whatsapp.connect({ pairingPhone: process.env.WA_PAIRING_PHONE }).catch((error) => {
     logger.error(`WhatsApp failed to start: ${error.message}`);
@@ -168,6 +210,7 @@ async function main() {
 
     worker.stop();
     digest.stop();
+    stageReport.stop();
     await whatsapp.disconnect().catch(() => {});
     await new Promise((resolve) => server.close(resolve));
     db.close();

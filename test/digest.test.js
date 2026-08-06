@@ -232,3 +232,60 @@ describe('the morning message', () => {
     assert.match(m.text, /Due today/);
   });
 });
+
+describe('end-of-day login and PF report', () => {
+  const { buildStageReport } = require('../src/pipeline/digest');
+
+  /** A CRM double whose daily report returns scripted transitions. */
+  function reportingCrm(byAgent) {
+    return {
+      users: new Map(),
+      async request(method, path) {
+        const id = new URL('http://x' + path).searchParams.get('user_id');
+        if (!(id in byAgent)) return null;
+        return { metrics: { transitions_by_stage: byAgent[id] } };
+      }
+    };
+  }
+
+  const AGENTS = [
+    { id: 'a1', name: 'Ankit' }, { id: 'a2', name: 'Himanshu' },
+    { id: 'a3', name: 'Zaid' }, { id: 'a4', name: 'Rudra' }
+  ];
+
+  test('counts only login and PF, ignoring other activity', async () => {
+    // Contacted and DNP measure effort; a login and a paid fee are where a file
+    // has actually moved forward.
+    const crm = reportingCrm({
+      a1: { contacted: 12, dnp: 5 },
+      a2: { logged_in: 2, contacted: 3 },
+      a3: { logged_in: 1, pf_paid: 1 },
+      a4: {}
+    });
+    const r = await buildStageReport(crm, AGENTS, { day: '2026-08-05' });
+
+    assert.match(r.text, /Himanshu\s+2 login/);
+    assert.match(r.text, /Zaid\s+1 login · 1 PF/);
+    assert.doesNotMatch(r.text, /contacted/, 'other stages are not the report');
+    assert.deepEqual(r.totals, { logged_in: 3, pf_paid: 1 });
+  });
+
+  test('someone with nothing is still listed', async () => {
+    // A name against a dash is the point of a team report. Hiding it would make
+    // the report only ever good news.
+    const crm = reportingCrm({ a1: {}, a2: {}, a3: {}, a4: {} });
+    const r = await buildStageReport(crm, AGENTS, { day: '2026-08-05' });
+
+    assert.match(r.text, /Ankit\s+—/);
+    assert.match(r.text, /Today: 0 login · 0 PF/);
+  });
+
+  test('an unreachable person is shown as such, not as zero', async () => {
+    // Reporting a failed lookup as "did nothing" would be a lie about someone's
+    // work.
+    const crm = reportingCrm({ a1: { logged_in: 1 } });
+    const r = await buildStageReport(crm, AGENTS, { day: '2026-08-05' });
+
+    assert.match(r.text, /Himanshu\s+\(no data\)/);
+  });
+});

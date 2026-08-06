@@ -229,6 +229,73 @@ async function buildMorningMessage(crm, options = {}) {
   };
 }
 
+/**
+ * The stages this report is about.
+ *
+ * Deliberately only two. Contacted and DNP measure activity; a bank login and a
+ * paid processing fee are the two points where a file has actually moved
+ * forward, and those are what the owner wants seen every evening.
+ */
+const REPORTED_STAGES = [
+  ['logged_in', 'login'],
+  ['pf_paid', 'PF']
+];
+
+/**
+ * The end-of-day login and PF report.
+ *
+ * Uses the CRM's own per-user daily report, which counts stage transitions on a
+ * given day — so this is what each person actually moved today, not the standing
+ * total.
+ *
+ * People with nothing are still listed. A name against a dash is the point of a
+ * team report; hiding it would make the report only ever good news.
+ *
+ * @param {import('../crm/client').CrmClient} crm
+ * @param {{id: string, name: string}[]} agents
+ * @param {{ day?: string }} [options]
+ * @returns {Promise<{text: string, totals: Object}|null>}
+ */
+async function buildStageReport(crm, agents, options = {}) {
+  const day = options.day || dateKey(0);
+  const rows = [];
+  const totals = Object.fromEntries(REPORTED_STAGES.map(([key]) => [key, 0]));
+
+  for (const agent of agents) {
+    const report = await crm
+      .request('GET', `/reports/daily?user_id=${agent.id}&date=${day}`)
+      .catch(() => null);
+
+    const moves = report?.metrics?.transitions_by_stage || {};
+    const counts = {};
+    for (const [key] of REPORTED_STAGES) {
+      counts[key] = moves[key] || 0;
+      totals[key] += counts[key];
+    }
+    rows.push({ name: agent.name, counts, reachable: Boolean(report) });
+  }
+
+  if (!rows.length) return null;
+
+  const lines = [`📈 ${formatDay(day)} — Login & PF`, ''];
+
+  for (const row of rows) {
+    const parts = REPORTED_STAGES
+      .filter(([key]) => row.counts[key] > 0)
+      .map(([key, label]) => `${row.counts[key]} ${label}`);
+
+    lines.push(`${row.name.padEnd(12)} ${parts.length ? parts.join(' · ')
+      : (row.reachable ? '—' : '(no data)')}`);
+  }
+
+  const summary = REPORTED_STAGES
+    .map(([key, label]) => `${totals[key]} ${label}`)
+    .join(' · ');
+  lines.push('', `Today: ${summary}`);
+
+  return { text: lines.join('\n'), totals };
+}
+
 /** "5 Aug" — short, since the message is read the next morning. */
 function formatDay(key) {
   const [y, m, d] = key.split('-').map(Number);
@@ -277,6 +344,6 @@ async function buildMyLeads(crm, profileId) {
 }
 
 module.exports = {
-  buildDailySummary, buildMyLeads, buildMorningMessage,
-  findFollowUps, renderFollowUps, dateKey, leadDate
+  buildDailySummary, buildMyLeads, buildMorningMessage, buildStageReport,
+  findFollowUps, renderFollowUps, dateKey, leadDate, REPORTED_STAGES
 };

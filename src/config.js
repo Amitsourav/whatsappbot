@@ -93,6 +93,20 @@ const config = {
   reassignAllowed: (process.env.REASSIGN_ALLOWED || '+917827225354')
     .split(',').map((s) => s.trim()).filter(Boolean),
 
+  /**
+   * The end-of-day login and PF report: who is listed, and when it posts.
+   *
+   * Identified by CRM email rather than name or profile id — emails are stable,
+   * names get edited, and ids differ between tenants.
+   */
+  stageReport: {
+    at: process.env.STAGE_REPORT_AT || '18:58',
+    agents: (process.env.STAGE_REPORT_AGENTS
+      || 'ankit@fundmycampus.com,hbhatia4216@gmail.com,'
+       + 'zaid@fundmycampus.com,fundmycampus@gmail.com')
+      .split(',').map((s) => s.trim().toLowerCase()).filter(Boolean)
+  },
+
   /** Duplicate suppression window, in minutes. */
   dedupeWindowMinutes: int(process.env.DEDUPE_WINDOW_MINUTES, 10)
 };
