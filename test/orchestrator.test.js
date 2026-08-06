@@ -762,7 +762,8 @@ describe('reassignment', () => {
     const { o, crm, wa, parentId } = await setup();
 
     await o.handle(incoming({
-      text: 'assign @919999888877', mentions: [ZAID_WA], quotedId: parentId
+      text: 'assign @919999888877', mentions: [ZAID_WA], quotedId: parentId,
+      senderPhone: '+917827225354'
     }));
 
     assert.deepEqual(crm.calls.updated.at(-1).fields, { assigned_agent_id: ZAID_CRM });
@@ -774,7 +775,8 @@ describe('reassignment', () => {
     const { o, crm, parentId } = await setup();
 
     await o.handle(incoming({
-      text: 'transfer @919999888877', mentions: [ZAID_WA], quotedId: parentId
+      text: 'transfer @919999888877', mentions: [ZAID_WA], quotedId: parentId,
+      senderPhone: '+917827225354'
     }));
 
     assert.match(crm.calls.remarks.at(-1).text,
@@ -799,7 +801,8 @@ describe('reassignment', () => {
     const before = crm.calls.updated.length;
 
     await o.handle(incoming({
-      text: 'assign @919999888877', mentions: [ZAID_WA], quotedId: parentId
+      text: 'assign @919999888877', mentions: [ZAID_WA], quotedId: parentId,
+      senderPhone: '+917827225354'
     }));
 
     assert.equal(crm.calls.updated.length, before);
@@ -811,7 +814,8 @@ describe('reassignment', () => {
     const before = crm.calls.updated.length;
 
     await o.handle(incoming({
-      text: 'assign @919111111111', mentions: ['+919111111111'], quotedId: parentId
+      text: 'assign @919111111111', mentions: ['+919111111111'], quotedId: parentId,
+      senderPhone: '+917827225354'
     }));
 
     assert.equal(crm.calls.updated.length, before);
@@ -823,7 +827,8 @@ describe('reassignment', () => {
     const before = crm.calls.updated.length;
 
     await o.handle(incoming({
-      text: 'assign @919999888877', mentions: [ZAID_WA], quotedId: parentId
+      text: 'assign @919999888877', mentions: [ZAID_WA], quotedId: parentId,
+      senderPhone: '+917827225354'
     }));
 
     assert.equal(crm.calls.updated.length, before);
@@ -835,7 +840,8 @@ describe('reassignment', () => {
     const before = crm.calls.updated.length;
 
     await o.handle(incoming({
-      text: 'assign @a @b', mentions: [ZAID_WA, RAHUL_WA], quotedId: parentId
+      text: 'assign @a @b', mentions: [ZAID_WA, RAHUL_WA], quotedId: parentId,
+      senderPhone: '+917827225354'
     }));
 
     assert.equal(crm.calls.updated.length, before);
@@ -852,5 +858,32 @@ describe('reassignment', () => {
     }));
 
     assert.equal(crm.calls.updated.length, before);
+  });
+});
+
+describe('only permitted people can move a lead', () => {
+  test('someone else is refused, and nothing moves', async () => {
+    // Reassignment takes work off whoever had it. Restricted to named numbers,
+    // not to everyone in the employee map.
+    makeGroup();
+    repo.employees.upsert({
+      waPhone: '+919999888877', crmProfileId: 'crm-zaid', name: 'Zaid Ansari'
+    });
+    const crm = fakeCrm();
+    crm.getLead = async (id) => ({ id, full_name: 'Kiran',
+      current_stage: 'processing', assigned_agent_id: RAHUL_CRM });
+    const wa = fakeWhatsApp();
+    const o = new Orchestrator({ crm, whatsapp: wa });
+    const msg = incoming();
+    await o.handle(msg);
+    const before = crm.calls.updated.length;
+
+    await o.handle(incoming({
+      text: 'assign @919999888877', mentions: ['+919999888877'], quotedId: msg.id,
+      senderPhone: '+919311359236'      // Himanshu — an employee, but not permitted
+    }));
+
+    assert.equal(crm.calls.updated.length, before, 'nothing may move');
+    assert.match(wa.sent.at(-1).text, /Only an admin can move a lead/);
   });
 });

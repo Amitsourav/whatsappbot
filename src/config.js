@@ -83,6 +83,16 @@ const config = {
 
   timezone: process.env.TZ_DISPLAY || 'Asia/Kolkata',
 
+  /**
+   * Who may move a lead to someone else.
+   *
+   * Reassignment takes work off whoever had it, so it is restricted to named
+   * numbers rather than anyone in the employee map. Comma-separated E.164;
+   * change it in Railway's variables, no code change needed.
+   */
+  reassignAllowed: (process.env.REASSIGN_ALLOWED || '+917827225354')
+    .split(',').map((s) => s.trim()).filter(Boolean),
+
   /** Duplicate suppression window, in minutes. */
   dedupeWindowMinutes: int(process.env.DEDUPE_WINDOW_MINUTES, 10)
 };

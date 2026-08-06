@@ -25,6 +25,7 @@ const commands = require('./commands');
 const { buildMyLeads } = require('./digest');
 const { DuplicateLeadError, CrmClient } = require('../crm/client');
 const repo = require('../db/repositories');
+const { config } = require('../config');
 const logger = require('../logger');
 
 /** Give up after this many CRM attempts and mark the lead failed. */
@@ -379,6 +380,13 @@ class Orchestrator {
     const refuse = (reason, extra = {}) => this.send(group, replies.reassignRefused({
       reason, name: parent.name, phone: parent.phone, ...extra
     }), rawMessage);
+
+    // Moving a lead takes it off whoever had it, so this is restricted rather
+    // than open to everyone in the employee map.
+    if (!config.reassignAllowed.includes(message.senderPhone)) {
+      logger.warn(`Reassign refused — ${message.senderPhone} is not permitted`);
+      return refuse('not_permitted');
+    }
 
     if (instruction.error) return refuse(instruction.error);
     if (!parent.crm_lead_id) return refuse('not_a_lead');

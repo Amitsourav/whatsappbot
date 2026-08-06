@@ -127,9 +127,12 @@ notice. That is why it was excluded originally.
 - **Never move a closed lead** — `disbursed` or `lost` should be refused, the same
   guard already used for duplicates.
 
-**To decide**
-- Who may reassign? Anyone, or only admins? Leaning admins only — reassignment is
-  a management action.
+**Decided.** Only named numbers may reassign — currently Deepak
+(+91 78272 25354) alone. Set through `REASSIGN_ALLOWED` in Railway's variables,
+comma-separated, so it changes without a deploy. Anyone else gets "Only an admin
+can move a lead to someone else" and nothing moves.
+
+**Still to decide**
 - Should the person losing the lead be tagged too, so they see it?
 - Is a confirmation step wanted, or is announcing it enough? Confirmation is safer
   but doubles the messages.

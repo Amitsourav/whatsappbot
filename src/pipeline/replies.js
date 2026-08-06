@@ -158,7 +158,8 @@ const replies = {
       no_mention: 'Tag the person to move it to — assign @name',
       multiple_mentions: 'Tag only one person',
       not_a_lead: 'Reply to the lead you want to move',
-      same_person: 'That lead is already theirs'
+      same_person: 'That lead is already theirs',
+      not_permitted: 'Only an admin can move a lead to someone else'
     }[reason] || 'I could not move that lead';
 
     const who = (name || phone) ? `\n${subject(name, phone)}` : '';
