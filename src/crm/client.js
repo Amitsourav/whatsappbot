@@ -224,6 +224,40 @@ class CrmClient {
   }
 
   /**
+   * List leads, following pagination.
+   *
+   * Verified against the live API: `date_from` and `current_stage` filter;
+   * `limit`, `assigned_agent_id` and `created_after` are silently ignored, so
+   * anything else must be filtered on our side. Default page size is 25.
+   *
+   * @param {Object} [filters] - e.g. { date_from: '2026-08-06', current_stage: 'created' }
+   * @param {number} [maxPages] - a stop, so a bad filter cannot walk 10,000 leads
+   * @returns {Promise<object[]>}
+   */
+  async listLeads(filters = {}, maxPages = 20) {
+    const collected = [];
+    let page = 1;
+
+    while (page <= maxPages) {
+      const query = new URLSearchParams({ ...filters, page: String(page), page_size: '100' });
+      const result = await this.request('GET', `/leads?${query}`);
+      const rows = result?.items || [];
+      collected.push(...rows);
+
+      const totalPages = result?.total_pages ?? 1;
+      if (page >= totalPages || rows.length === 0) break;
+      page += 1;
+    }
+
+    if (page > maxPages) {
+      // Silent truncation would read as "this is everything".
+      logger.warn(`listLeads stopped at ${maxPages} pages — results are incomplete`);
+    }
+
+    return collected;
+  }
+
+  /**
    * Find a lead by phone number.
    *
    * Search is substring ILIKE, not exact, and can return several rows (C5). A full

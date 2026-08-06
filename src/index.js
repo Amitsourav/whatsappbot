@@ -14,6 +14,8 @@ const { CrmClient } = require('./crm/client');
 const { WhatsAppClient } = require('./whatsapp/client');
 const { Orchestrator } = require('./pipeline/orchestrator');
 const { RetryWorker } = require('./pipeline/worker');
+const { DailyScheduler } = require('./pipeline/scheduler');
+const { buildDailySummary } = require('./pipeline/digest');
 const { createServer } = require('./api/server');
 
 async function main() {
@@ -123,6 +125,35 @@ async function main() {
 
   worker.start();
 
+  // Yesterday's summary, posted into each monitored group that has replies on.
+  // Nothing is posted on a day with no leads — a summary reading "0" every
+  // morning trains people to ignore the bot.
+  const digest = new DailyScheduler({
+    name: 'daily-summary',
+    at: process.env.DAILY_SUMMARY_AT || '09:00',
+    run: async () => {
+      if (repo.settings.get('sending_paused') === 'true') {
+        logger.info('Sending is paused — skipping the daily summary');
+        return;
+      }
+
+      const summary = await buildDailySummary(crm);
+      if (!summary) {
+        logger.info('No leads yesterday — no summary posted');
+        return;
+      }
+
+      for (const group of repo.groups.active()) {
+        if (!group.send_enabled || group.purpose !== 'inhouse') continue;
+        await whatsapp.reply({ groupId: group.wa_group_id, text: summary.text });
+      }
+
+      logger.info(`Daily summary posted: ${summary.leads} lead(s), `
+        + `${summary.untouched} untouched`);
+    }
+  });
+  digest.start();
+
   // WhatsApp last, and non-blocking: if it fails, the panel is still up to fix it.
   whatsapp.connect({ pairingPhone: process.env.WA_PAIRING_PHONE }).catch((error) => {
     logger.error(`WhatsApp failed to start: ${error.message}`);
@@ -136,6 +167,7 @@ async function main() {
     logger.info(`${signal} — shutting down`);
 
     worker.stop();
+    digest.stop();
     await whatsapp.disconnect().catch(() => {});
     await new Promise((resolve) => server.close(resolve));
     db.close();
