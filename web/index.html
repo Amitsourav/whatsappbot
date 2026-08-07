@@ -113,6 +113,7 @@
       <button data-tab="employees">Employees</button>
       <button data-tab="held">Needs attention</button>
       <button data-tab="leads">Leads</button>
+      <button data-tab="banks">Bank shares</button>
       <button data-tab="diagnostics">Diagnostics</button>
     </nav>
     <div style="margin-left:auto" class="row">
@@ -255,7 +256,9 @@ const views = {
   },
 
   async groups() {
-    const { groups } = await api('/groups');
+    const [{ groups }, { banks }] = await Promise.all([
+      api('/groups'), api('/banks').catch(() => ({ banks: [] }))
+    ]);
     if (!groups.length) {
       return `<div class="card"><div class="empty">
         No groups yet. Link the WhatsApp number first — the groups it belongs to
@@ -264,9 +267,10 @@ const views = {
     return `<div class="card">
       <h2>Groups</h2>
       <p class="hint">Switch on the groups to watch. <b>In-house</b> groups create
-        CRM leads. <b>Bank</b> groups are saved for later and the bot never posts in them.</p>
+        CRM leads. <b>Bank</b> groups record which lender a lead was sent to —
+        the bot never posts in those.</p>
       <div class="scroll"><table>
-        <tr><th>Group</th><th>Watch</th><th>Type</th><th>Replies</th></tr>
+        <tr><th>Group</th><th>Watch</th><th>Type</th><th>Bank</th><th>Replies</th></tr>
         ${groups.map((g) => `<tr>
           <td>${esc(g.name)}</td>
           <td><label class="switch"><input type="checkbox" ${g.is_active ? 'checked' : ''}
@@ -275,6 +279,14 @@ const views = {
             <option value="inhouse" ${g.purpose === 'inhouse' ? 'selected' : ''}>In-house</option>
             <option value="bank" ${g.purpose === 'bank' ? 'selected' : ''}>Bank</option>
           </select></td>
+          <td>${g.purpose === 'bank' ? `
+            <select onchange="saveGroup(${g.id},{bank_name:this.value})">
+              <option value="">Choose the bank…</option>
+              ${banks.map((b) => `<option value="${esc(b)}"
+                  ${g.bank_name === b ? 'selected' : ''}>${esc(b)}</option>`).join('')}
+            </select>
+            ${g.bank_name ? '' : '<div class="err">Needed before anything is recorded</div>'}
+          ` : '<span class="pill">—</span>'}</td>
           <td>${g.purpose === 'bank'
             ? '<span class="pill">never</span>'
             : `<label class="switch"><input type="checkbox" ${g.send_enabled ? 'checked' : ''}
@@ -367,6 +379,35 @@ const views = {
           <td>${esc(l.phone || '—')}</td>
           <td>${esc(l.employee_name || '—')}</td>
           <td><span class="pill ${PILL[l.status] || ''}">${esc(l.status)}</span></td>
+        </tr>`).join('')}
+      </table></div>
+    </div>`;
+  },
+
+  async banks() {
+    const { shares } = await api('/bank-shares?limit=100');
+    if (!shares.length) {
+      return `<div class="card"><div class="empty">
+        Nothing yet. When someone shares a lead in a bank group, it appears here.
+      </div></div>`;
+    }
+    const PILL = { recorded: 'ok', unknown: 'warn', failed: 'bad', pending: '' };
+    const LABEL = {
+      recorded: 'recorded', unknown: 'not in CRM', failed: 'failed', pending: 'sending'
+    };
+    return `<div class="card">
+      <h2>Leads shared with banks</h2>
+      <p class="hint">Captured from the bank groups. <b>Not in CRM</b> means the number
+        was shared with a lender but we hold no such lead — your team was told.</p>
+      <div class="scroll"><table>
+        <tr><th>When</th><th>Bank</th><th>Phone</th><th>Shared by</th><th>Group</th><th>Status</th></tr>
+        ${shares.map((s) => `<tr>
+          <td>${esc(s.created_at)}</td>
+          <td>${esc(s.bank_name)}</td>
+          <td>${esc(s.phone)}</td>
+          <td>${esc(s.employee_name || '—')}</td>
+          <td>${esc(s.group_name || '—')}</td>
+          <td><span class="pill ${PILL[s.status] || ''}">${esc(LABEL[s.status] || s.status)}</span></td>
         </tr>`).join('')}
       </table></div>
     </div>`;

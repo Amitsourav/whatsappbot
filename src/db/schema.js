@@ -188,6 +188,74 @@ const MIGRATIONS = [
       ALTER TABLE groups ADD COLUMN last_seen_at TEXT;
     `
   }
+  ,{
+    name: '003_bank_groups',
+    sql: `
+      -- Which bank a group represents. Must match the CRM's canonical list
+      -- exactly, or every share from that group is rejected.
+      ALTER TABLE groups ADD COLUMN bank_name TEXT;
+
+      -- A lead we saw shared into a bank's group.
+      --
+      -- Recorded before the CRM is called, like leads, so a redelivery or a
+      -- mid-flight failure is recoverable rather than duplicate-producing.
+      CREATE TABLE bank_shares (
+        id             INTEGER PRIMARY KEY AUTOINCREMENT,
+        wa_message_id  TEXT    NOT NULL UNIQUE,
+        group_id       INTEGER REFERENCES groups(id) ON DELETE SET NULL,
+        bank_name      TEXT    NOT NULL,
+
+        phone          TEXT    NOT NULL,
+        crm_lead_id    TEXT,
+        sender_phone   TEXT,
+        employee_id    INTEGER REFERENCES employees(id) ON DELETE SET NULL,
+        raw_message    TEXT    NOT NULL,
+
+        -- pending   accepted, not yet sent
+        -- recorded  the share is in the CRM
+        -- unknown   the phone is not a lead in the CRM (the team was told)
+        -- failed    gave up after retries
+        status         TEXT    NOT NULL DEFAULT 'pending'
+                       CHECK (status IN ('pending','recorded','unknown','failed')),
+        attempts       INTEGER NOT NULL DEFAULT 0,
+        last_error     TEXT,
+        notified       INTEGER NOT NULL DEFAULT 0,
+
+        created_at     TEXT    NOT NULL DEFAULT (datetime('now')),
+        updated_at     TEXT    NOT NULL DEFAULT (datetime('now'))
+      );
+
+      CREATE INDEX idx_bank_shares_status ON bank_shares(status, attempts);
+      CREATE INDEX idx_bank_shares_phone  ON bank_shares(phone);
+      CREATE INDEX idx_bank_shares_lead   ON bank_shares(crm_lead_id, bank_name);
+
+      -- Conversation about a lead inside a bank's group, ours and the bank's.
+      --
+      -- Kept against the lead-and-bank pair rather than the lead, so the ICICI
+      -- discussion stays under ICICI.
+      CREATE TABLE bank_messages (
+        id             INTEGER PRIMARY KEY AUTOINCREMENT,
+        wa_message_id  TEXT    NOT NULL UNIQUE,
+        group_id       INTEGER REFERENCES groups(id) ON DELETE SET NULL,
+        bank_name      TEXT    NOT NULL,
+        crm_lead_id    TEXT    NOT NULL,
+
+        body           TEXT    NOT NULL,
+        sender_phone   TEXT,
+        is_our_team    INTEGER NOT NULL DEFAULT 0,
+
+        status         TEXT    NOT NULL DEFAULT 'pending'
+                       CHECK (status IN ('pending','applied','failed')),
+        attempts       INTEGER NOT NULL DEFAULT 0,
+        last_error     TEXT,
+
+        created_at     TEXT    NOT NULL DEFAULT (datetime('now'))
+      );
+
+      CREATE INDEX idx_bank_messages_status ON bank_messages(status, attempts);
+      CREATE INDEX idx_bank_messages_lead   ON bank_messages(crm_lead_id, bank_name);
+    `
+  }
 ];
 
 module.exports = { MIGRATIONS };

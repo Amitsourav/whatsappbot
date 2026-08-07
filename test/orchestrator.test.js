@@ -400,13 +400,15 @@ describe('group and sending guards', () => {
     assert.equal(crm.calls.created.length, 0);
   });
 
-  test('a bank group is recorded but not processed — Way 2 is not built', async () => {
+  test('a bank group never creates a lead', async () => {
+    // Bank groups follow an entirely different set of rules — see bank.test.js.
     makeGroup({ purpose: 'bank' });
     const crm = fakeCrm();
-    await new Orchestrator({ crm, whatsapp: fakeWhatsApp() }).handle(incoming());
+    const wa = fakeWhatsApp();
+    await new Orchestrator({ crm, whatsapp: wa }).handle(incoming());
 
-    assert.equal(crm.calls.created.length, 0);
-    assert.ok(repo.skipped.recent().some((s) => s.reason === 'bank_group_not_implemented'));
+    assert.equal(crm.calls.created.length, 0, 'leads are never created from a bank group');
+    assert.equal(wa.sent.length, 0, 'and the bot never posts there');
   });
 
   test('sending off still captures the lead (S3/S4)', async () => {

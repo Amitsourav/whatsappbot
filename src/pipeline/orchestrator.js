@@ -23,6 +23,7 @@ const { replies } = require('./replies');
 const { LOCKED_LISTS } = require('../crm/fields');
 const commands = require('./commands');
 const { buildMyLeads } = require('./digest');
+const { BankHandler } = require('./bank');
 const { DuplicateLeadError, CrmClient } = require('../crm/client');
 const repo = require('../db/repositories');
 const { config } = require('../config');
@@ -38,6 +39,7 @@ class Orchestrator {
   constructor({ crm, whatsapp }) {
     this.crm = crm;
     this.whatsapp = whatsapp;
+    this.bank = new BankHandler({ crm, whatsapp });
   }
 
   /**
@@ -60,14 +62,9 @@ class Orchestrator {
       });
 
       if (group.purpose === 'bank') {
-        // Way 2 is not designed yet. Recorded rather than ignored, so when it is
-        // built there is real data to build against.
-        repo.skipped.record({
-          waMessageId: message.id, groupId: group.id,
-          body: message.text || '', reason: 'bank_group_not_implemented',
-          senderPhone: message.senderPhone
-        });
-        return;
+        // A different set of rules entirely — see pipeline/bank.js. The bot never
+        // posts in these groups.
+        return await this.bank.handle(message, group);
       }
 
       const command = commands.parse(message.text);

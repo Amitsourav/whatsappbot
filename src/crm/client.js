@@ -396,6 +396,53 @@ class CrmClient {
     return this.request('POST', `/leads/${leadId}/remarks`, { body: stamped.slice(0, 5000) });
   }
 
+  /**
+   * Record that a lead was shared into a bank's WhatsApp group.
+   *
+   * Idempotent on (lead, bank): sharing the same lead to the same bank again
+   * keeps the original shared_at and does not create a second row.
+   *
+   * @param {string} leadId
+   * @param {{ bankName: string, sharedBy?: string, sharedAt?: string,
+   *           waGroupId?: string }} share
+   * @returns {Promise<Object>}
+   */
+  async recordBankShare(leadId, { bankName, sharedBy, sharedAt, waGroupId }) {
+    return this.request('POST', `/leads/${leadId}/bank-shares`, {
+      bank_name: bankName,
+      shared_by: sharedBy || undefined,
+      shared_at: sharedAt || undefined,
+      wa_group_id: waGroupId || undefined,
+      source: 'whatsapp'
+    });
+  }
+
+  /**
+   * Append a message to the conversation about a lead in a bank's group.
+   *
+   * Idempotent on wa_message_id, which is what makes replaying a message after a
+   * reconnect harmless.
+   *
+   * @param {string} leadId
+   * @param {string} bankName
+   * @param {{ body: string, senderPhone?: string, senderName?: string,
+   *           isOurTeam?: boolean, waMessageId: string }} message
+   * @returns {Promise<Object>}
+   */
+  async addBankMessage(leadId, bankName, message) {
+    const body = String(message.body || '').trim();
+    if (!body) throw new CrmError('Bank message body is empty');
+
+    return this.request('POST',
+      `/leads/${leadId}/bank-shares/${encodeURIComponent(bankName)}/messages`, {
+        body: body.slice(0, 5000),
+        sender_phone: message.senderPhone || undefined,
+        sender_name: message.senderName || undefined,
+        is_our_team: Boolean(message.isOurTeam),
+        wa_message_id: message.waMessageId
+      });
+  }
+
   /** @returns {Promise<Object>} the authenticated service account */
   async whoami() {
     return this.request('GET', '/users/me');

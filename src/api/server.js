@@ -105,6 +105,7 @@ function createServer({ whatsapp, crm, orchestrator }) {
     const { is_active: isActive, purpose, send_enabled: sendEnabled } = req.body || {};
 
     if (purpose !== undefined) repo.groups.setPurpose(id, purpose);
+    if (req.body?.bank_name !== undefined) repo.groups.setBank(id, req.body.bank_name);
     if (isActive !== undefined) repo.groups.setActive(id, isActive);
     // Set last: a bank purpose forces sending off, and that must win.
     if (sendEnabled !== undefined) repo.groups.setSendEnabled(id, sendEnabled);
@@ -114,6 +115,16 @@ function createServer({ whatsapp, crm, orchestrator }) {
   });
 
   // ---- employees ----------------------------------------------------------
+  /** The CRM's canonical bank list, for the group screen's dropdown. */
+  api.get('/banks', wrap(async (req, res) => {
+    const banks = await crm.request('GET', '/leads/banks').catch(() => []);
+    res.json({ banks: Array.isArray(banks) ? banks : (banks.banks || []) });
+  }));
+
+  api.get('/bank-shares', (req, res) => {
+    res.json({ shares: repo.bankShares.recent(Number(req.query.limit) || 50) });
+  });
+
   api.get('/employees', (req, res) => {
     res.json({ employees: repo.employees.all() });
   });

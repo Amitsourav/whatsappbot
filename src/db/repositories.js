@@ -60,6 +60,12 @@ const groups = {
     `).run(id, timestamp, fromMe ? 1 : 0, waGroupId, timestamp);
   },
 
+  /** Which bank a group represents. Must match the CRM's list exactly. */
+  setBank(id, bankName) {
+    get().prepare("UPDATE groups SET bank_name = ?, updated_at = datetime('now') WHERE id = ?")
+      .run(bankName || null, id);
+  },
+
   setPurpose(id, purpose) {
     get().prepare(`
       UPDATE groups
@@ -294,6 +300,139 @@ const skipped = {
   }
 };
 
+/** Leads seen shared into a bank's group. */
+const bankShares = {
+  create(row) {
+    const result = get().prepare(`
+      INSERT OR IGNORE INTO bank_shares
+        (wa_message_id, group_id, bank_name, phone, crm_lead_id, sender_phone,
+         employee_id, raw_message, status)
+      VALUES (@waMessageId, @groupId, @bankName, @phone, @crmLeadId, @senderPhone,
+              @employeeId, @rawMessage, @status)
+    `).run({
+      crmLeadId: null, senderPhone: null, employeeId: null,
+      status: 'pending', ...row
+    });
+    return result.changes === 0 ? null : this.byId(result.lastInsertRowid);
+  },
+
+  byId(id) {
+    return get().prepare('SELECT * FROM bank_shares WHERE id = ?').get(id) || null;
+  },
+
+  byWaMessageId(waMessageId) {
+    return get().prepare('SELECT * FROM bank_shares WHERE wa_message_id = ?')
+      .get(waMessageId) || null;
+  },
+
+  /** The most recent share of this phone into this bank, for attaching replies. */
+  latestFor(phone, bankName) {
+    return get().prepare(`
+      SELECT * FROM bank_shares
+      WHERE phone = ? AND bank_name = ? AND crm_lead_id IS NOT NULL
+      ORDER BY id DESC LIMIT 1
+    `).get(phone, bankName) || null;
+  },
+
+  markRecorded(id, crmLeadId) {
+    get().prepare(`
+      UPDATE bank_shares SET status = 'recorded', crm_lead_id = ?, last_error = NULL,
+                             updated_at = datetime('now')
+      WHERE id = ?
+    `).run(crmLeadId, id);
+  },
+
+  /** The phone is not a lead in the CRM — the team is told once. */
+  markUnknown(id) {
+    get().prepare(`
+      UPDATE bank_shares SET status = 'unknown', updated_at = datetime('now')
+      WHERE id = ?
+    `).run(id);
+  },
+
+  markFailed(id, error) {
+    get().prepare(`
+      UPDATE bank_shares SET status = 'failed', last_error = ?,
+                             updated_at = datetime('now')
+      WHERE id = ?
+    `).run(String(error).slice(0, 1000), id);
+  },
+
+  recordAttempt(id) {
+    get().prepare(`
+      UPDATE bank_shares SET attempts = attempts + 1, updated_at = datetime('now')
+      WHERE id = ?
+    `).run(id);
+  },
+
+  recordError(id, error) {
+    get().prepare('UPDATE bank_shares SET last_error = ? WHERE id = ?')
+      .run(String(error).slice(0, 1000), id);
+  },
+
+  markNotified(id) {
+    get().prepare('UPDATE bank_shares SET notified = 1 WHERE id = ?').run(id);
+  },
+
+  pending(limit = 20) {
+    return get().prepare(`
+      SELECT * FROM bank_shares WHERE status = 'pending' AND attempts < 8
+      ORDER BY created_at ASC LIMIT ?
+    `).all(limit);
+  },
+
+  recent(limit = 50) {
+    return get().prepare(`
+      SELECT b.*, g.name AS group_name, e.name AS employee_name
+      FROM bank_shares b
+      LEFT JOIN groups g ON g.id = b.group_id
+      LEFT JOIN employees e ON e.id = b.employee_id
+      ORDER BY b.created_at DESC LIMIT ?
+    `).all(limit);
+  }
+};
+
+/** Conversation about a lead inside a bank's group. */
+const bankMessages = {
+  create(row) {
+    const result = get().prepare(`
+      INSERT OR IGNORE INTO bank_messages
+        (wa_message_id, group_id, bank_name, crm_lead_id, body, sender_phone, is_our_team)
+      VALUES (@waMessageId, @groupId, @bankName, @crmLeadId, @body, @senderPhone, @isOurTeam)
+    `).run({ senderPhone: null, isOurTeam: 0, ...row });
+    return result.changes === 0 ? null : this.byId(result.lastInsertRowid);
+  },
+
+  byId(id) {
+    return get().prepare('SELECT * FROM bank_messages WHERE id = ?').get(id) || null;
+  },
+
+  markApplied(id) {
+    get().prepare("UPDATE bank_messages SET status = 'applied' WHERE id = ?").run(id);
+  },
+
+  markFailed(id, error) {
+    get().prepare("UPDATE bank_messages SET status = 'failed', last_error = ? WHERE id = ?")
+      .run(String(error).slice(0, 1000), id);
+  },
+
+  recordAttempt(id) {
+    get().prepare('UPDATE bank_messages SET attempts = attempts + 1 WHERE id = ?').run(id);
+  },
+
+  recordError(id, error) {
+    get().prepare('UPDATE bank_messages SET last_error = ? WHERE id = ?')
+      .run(String(error).slice(0, 1000), id);
+  },
+
+  pending(limit = 20) {
+    return get().prepare(`
+      SELECT * FROM bank_messages WHERE status = 'pending' AND attempts < 8
+      ORDER BY created_at ASC LIMIT ?
+    `).all(limit);
+  }
+};
+
 const settings = {
   get(key, fallback = null) {
     const row = get().prepare('SELECT value FROM settings WHERE key = ?').get(key);
@@ -330,4 +469,7 @@ const logs = {
   }
 };
 
-module.exports = { groups, employees, leads, leadUpdates, skipped, settings, logs };
+module.exports = {
+  groups, employees, leads, leadUpdates, bankShares, bankMessages,
+  skipped, settings, logs
+};

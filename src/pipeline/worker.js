@@ -55,8 +55,10 @@ class RetryWorker {
     try {
       leads = await this.retryLeads();
       updates = await this.retryUpdates();
-      if (leads || updates) {
-        logger.info(`Retry pass: ${leads} lead(s), ${updates} update(s)`);
+      const banks = await this.retryBankWork();
+      if (leads || updates || banks) {
+        logger.info(`Retry pass: ${leads} lead(s), ${updates} update(s), `
+          + `${banks} bank item(s)`);
       }
     } catch (error) {
       logger.error(`Retry pass failed: ${error.message}`);
@@ -108,6 +110,31 @@ class RetryWorker {
       ];
 
       await this.orchestrator.applyUpdate(record, parent, parsed, remarkParts, null, undefined);
+      handled += 1;
+    }
+
+    return handled;
+  }
+
+  /**
+   * Bank shares and bank-group messages that have not reached the CRM.
+   * @private
+   */
+  async retryBankWork() {
+    let handled = 0;
+
+    for (const share of repo.bankShares.pending(BATCH_SIZE)) {
+      if (!dueForRetry(share)) continue;
+      const group = share.group_id
+        ? repo.groups.all().find((g) => g.id === share.group_id)
+        : null;
+      await this.orchestrator.bank.pushShare(share, group);
+      handled += 1;
+    }
+
+    for (const record of repo.bankMessages.pending(BATCH_SIZE)) {
+      if (!dueForRetry(record)) continue;
+      await this.orchestrator.bank.pushMessage(record);
       handled += 1;
     }
 
