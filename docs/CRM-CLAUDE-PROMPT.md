@@ -274,3 +274,96 @@ and know what's actually missing.
 > We will also be writing remarks at a steadier rate than before — one per shared
 > lead, plus one per detail added in the group. All through
 > `POST /leads/{id}/remarks`, never `lead.notes`.
+
+---
+
+## Prompt 5 — The bank-sharing grid (send when ready to start Way 2)
+
+> We are extending the WhatsApp integration. Phase one is live and working: leads
+> posted in our internal group are created in the CRM, assigned, and updated from
+> replies.
+>
+> Phase two is about the **bank groups**. We are in a WhatsApp group for each
+> lender. When our team shares a lead into one of those groups, that is us
+> submitting the file to that bank — and today nothing records it. We want the CRM
+> to hold that, and to show it as a grid.
+>
+> **What we need built**
+>
+> **1. A record of "this lead was shared with this bank"**
+>
+> One row per lead-per-bank, holding:
+>
+> | Field | Meaning |
+> |---|---|
+> | `lead_id` | the lead |
+> | `bank_name` | from your existing locked list of 18 |
+> | `shared_at` | when it was shared into that bank's group |
+> | `shared_by` | `profile_id` of the person who shared it |
+> | `source` | `whatsapp` for now |
+> | `wa_group_id` | which WhatsApp group, for tracing |
+>
+> A lead can be shared with many banks; the same lead and bank should exist only
+> once. If it is shared again, keep the original `shared_at` and record the repeat
+> as a message (below) rather than creating a second row.
+>
+> **2. Messages attached to that lead-and-bank**
+>
+> After a lead is shared, people keep talking about it in that group — our team and
+> the bank's staff both. We want that conversation kept against that specific
+> lead-and-bank pair, not mixed into the lead's general remarks.
+>
+> | Field | Meaning |
+> |---|---|
+> | `body` | the message text |
+> | `sender_phone` | WhatsApp number it came from |
+> | `sender_name` | if we can resolve it |
+> | `is_our_team` | true if the sender is one of our staff |
+> | `wa_message_id` | WhatsApp's id, unique — so a redelivered message is a no-op |
+> | `created_at` | |
+>
+> **3. Endpoints for the bot**
+>
+> - **Record a share.** Something like `POST /leads/{id}/bank-shares` taking
+>   `bank_name`, `shared_by`, `shared_at`, `wa_group_id`. Idempotent on
+>   (lead, bank) — a repeat must not create a second row or error.
+> - **Append a message.** `POST /leads/{id}/bank-shares/{bank}/messages`, idempotent
+>   on `wa_message_id`.
+> - **Read the grid** — see below.
+>
+> Same `X-API-Key` auth as today. The bot only ever adds; it never deletes.
+>
+> **4. The grid page**
+>
+> One row per lead, one column per bank:
+>
+> ```
+> Student name | Number | Counsellor | Stage | Loan amount | PNB | SBI | ICICI | Axis | …
+> ```
+>
+> - A cell is **coloured** when that lead has been shared with that bank, blank
+>   otherwise.
+> - **Hovering a cell** shows: when it was shared, who shared it, and the messages
+>   since — the conversation about that lead in that bank's group.
+>
+> So the grid answers, at a glance: which banks has this file gone to, and what has
+> happened with each.
+>
+> An endpoint behind it needs to return leads with their bank shares in one call —
+> a request per cell would not be usable.
+>
+> **Please check one thing before building**
+>
+> Your earlier report mentioned a `lead_banks` table, and `bank_name` / `bank_status`
+> on the lead being system-managed "when lead_banks is used". If `lead_banks` already
+> models a lead's relationship with a bank, **extend it rather than adding a parallel
+> structure** — two places recording which bank a lead is with would drift apart, and
+> we would rather fit into what exists.
+>
+> Tell us which way you have gone and what the final field names are.
+>
+> **What we are not asking for**
+>
+> - No changes to `bank_status`. This is about *shared with*, not the bank's decision.
+> - No delete endpoints.
+> - Nothing that writes `lead.notes` — we are still staying away from that column.
