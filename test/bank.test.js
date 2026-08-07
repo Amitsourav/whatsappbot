@@ -20,7 +20,12 @@ function fakeCrm({ lead = { id: 'crm-lead-1', full_name: 'Priya Sharma' } } = {}
   return {
     calls,
     users: new Map(),
-    async findByPhone(phone) { calls.lookups.push(phone); return lead; },
+    async findByPhone(phone) {
+      calls.lookups.push(phone);
+      if (lead === 'ambiguous') return { status: 'ambiguous', lead: null, candidates: 2 };
+      if (lead === 'error') throw new Error('CRM unreachable');
+      return lead ? { status: 'found', lead } : { status: 'none', lead: null };
+    },
     async recordBankShare(leadId, share) { calls.shares.push({ leadId, ...share }); return { id: 's1' }; },
     async addBankMessage(leadId, bank, msg) { calls.messages.push({ leadId, bank, ...msg }); return { id: 'm1' }; }
   };
@@ -230,5 +235,38 @@ describe('a group with no bank set', () => {
 
     assert.equal(crm.calls.shares.length, 0);
     assert.ok(repo.skipped.recent().some((s) => s.reason === 'bank_not_mapped'));
+  });
+});
+
+describe('a lookup that could not be answered', () => {
+  test('a CRM failure is never reported as "not in the CRM"', async () => {
+    // The bug this replaced: a failed search returned null, which read exactly
+    // like "no such lead" — so a slow CRM would have the bot announce that real
+    // leads did not exist.
+    const group = bankGroup();
+    inhouseGroup();
+    const crm = fakeCrm({ lead: 'error' });
+    const wa = fakeWhatsApp();
+
+    await new BankHandler({ crm, whatsapp: wa }).handle(msg(), group);
+
+    assert.equal(wa.sent.length, 0, 'must not claim the lead is missing');
+    const share = repo.bankShares.recent()[0];
+    assert.equal(share.status, 'pending', 'left for the retry worker');
+  });
+
+  test('two leads with the same number is refused, not guessed', async () => {
+    // The CRM allows duplicate phones, and their own report confirmed an edit can
+    // create them. Recording against the wrong lead is worse than not recording.
+    const group = bankGroup();
+    inhouseGroup();
+    const crm = fakeCrm({ lead: 'ambiguous' });
+    const wa = fakeWhatsApp();
+
+    await new BankHandler({ crm, whatsapp: wa }).handle(msg(), group);
+
+    assert.equal(crm.calls.shares.length, 0);
+    assert.equal(wa.sent.length, 0, 'and it is not announced as missing either');
+    assert.equal(repo.bankShares.recent()[0].status, 'failed');
   });
 });

@@ -268,12 +268,16 @@ class CrmClient {
    * @returns {Promise<object|null>} the single match, or null if none or ambiguous
    */
   async findByPhone(phone) {
-    if (!phone) return null;
+    if (!phone) return { status: 'none', lead: null };
+
     const national = String(phone).replace(/^\+91/, '');
 
-    const result = await this.request('GET', `/leads/search?q=${encodeURIComponent(national)}`)
-      .catch(() => null);
-    if (!result) return null;
+    // Deliberately NOT caught. A failed search is not the same as "no such lead",
+    // and treating it as one would have the bot announce that a real lead does
+    // not exist every time the CRM was slow. The caller retries instead.
+    const result = await this.request(
+      'GET', `/leads/search?q=${encodeURIComponent(national)}`
+    );
 
     const rows = Array.isArray(result) ? result : (result.items || result.leads || []);
     const exact = rows.filter((r) => {
@@ -281,7 +285,16 @@ class CrmClient {
       return stored.endsWith(national);
     });
 
-    return exact.length === 1 ? exact[0] : null;
+    if (exact.length === 1) return { status: 'found', lead: exact[0] };
+
+    // More than one lead carries this number — the CRM allows that, and their own
+    // report confirmed edits can create it. Guessing between them is worse than
+    // saying we could not tell.
+    if (exact.length > 1) {
+      return { status: 'ambiguous', lead: null, candidates: exact.length };
+    }
+
+    return { status: 'none', lead: null };
   }
 
   /**

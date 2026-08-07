@@ -186,7 +186,11 @@ class Orchestrator {
         // A number posted with no tag is usually a question — "who has this one?"
         // Answering it is more useful than asking them to tag someone, and the
         // lookup is read-only.
-        const existing = await this.crm.findByPhone(result.phone).catch(() => null);
+        // A lookup that failed is not an answer. Falling back to "please tag
+        // someone" is the safe response either way.
+        const match = await this.crm.findByPhone(result.phone)
+          .catch(() => ({ status: 'error', lead: null }));
+        const existing = match.status === 'found' ? match.lead : null;
 
         if (existing) {
           repo.leads.markExisting(lead.id, existing.id);

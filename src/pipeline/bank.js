@@ -148,9 +148,19 @@ class BankHandler {
     repo.bankShares.recordAttempt(share.id);
 
     try {
-      const lead = await this.crm.findByPhone(share.phone);
+      const match = await this.crm.findByPhone(share.phone);
 
-      if (!lead) {
+      if (match.status === 'ambiguous') {
+        // Several leads carry this number. Recording the share against the wrong
+        // one is worse than not recording it, and telling the team it does not
+        // exist would simply be false.
+        repo.bankShares.markFailed(share.id,
+          `${match.candidates} leads share this number — cannot tell which`);
+        logger.error(`${share.phone} matches ${match.candidates} leads — share not recorded`);
+        return;
+      }
+
+      if (match.status === 'none') {
         // Not a lead we hold. Real information, but unexpected — our own team
         // should look at it.
         repo.bankShares.markUnknown(share.id);
@@ -158,6 +168,8 @@ class BankHandler {
         await this.notifyUnknown(share, group);
         return;
       }
+
+      const lead = match.lead;
 
       const employee = share.employee_id
         ? repo.employees.all().find((e) => e.id === share.employee_id)

@@ -34,7 +34,9 @@ function fakeCrm(overrides = {}) {
       return { id: 'remark-1' };
     },
     async findByPhone() {
-      return overrides.existingByPhone || null;
+      return overrides.existingByPhone
+        ? { status: 'found', lead: overrides.existingByPhone }
+        : { status: 'none', lead: null };
     },
     async getLead(id) {
       calls.fetched.push(id);
