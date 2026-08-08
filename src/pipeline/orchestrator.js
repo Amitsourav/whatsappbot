@@ -557,18 +557,17 @@ class Orchestrator {
       if (group && !record.replied) {
         // Confirm what landed, and explain what did not — this is how the team
         // learns the labelled format (R9).
-        if (changes.length) {
-          await this.send(group, replies.fieldsUpdated(changes), rawMessage,
-            () => repo.leadUpdates.markReplied(record.id));
-        }
+        // One message in, one message out (S2). A reply listing several things
+        // must not produce a reply per line.
+        const parts = [];
+        if (changes.length) parts.push(replies.fieldsUpdated(changes).text);
 
-        for (const rejected of parsed.rejected) {
-          await this.send(group, replies.labelRejected({
-            ...rejected,
-            allowed: rejected.reason === 'not_in_locked_list'
-              ? LOCKED_LISTS[require('../crm/fields').resolveLabel(rejected.label)]
-              : null
-          }), rawMessage, () => repo.leadUpdates.markReplied(record.id));
+        const refused = replies.labelRejected(parsed.rejected);
+        if (refused) parts.push(refused.text);
+
+        if (parts.length) {
+          await this.send(group, { text: parts.join('\n'), mentions: [] },
+            rawMessage, () => repo.leadUpdates.markReplied(record.id));
         }
       }
     } catch (error) {

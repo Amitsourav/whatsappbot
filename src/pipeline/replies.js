@@ -187,15 +187,37 @@ const replies = {
     };
   },
 
-  /** 6 — a labelled reply the bot could not use. */
-  labelRejected({ label, value, reason, allowed }) {
-    const head = reason === 'not_in_locked_list'
-      ? `⚠️ "${value}" isn't in the ${LABELS[label] || label} list — saved as a note instead`
-      : `⚠️ "${label}" isn't a field I know — saved as a note instead`;
-    return {
-      text: allowed?.length ? `${head}\n${allowed.join(', ')}` : head,
-      mentions: []
-    };
+  /**
+   * 6 — labelled lines the bot could not use.
+   *
+   * Takes them all together. A message listing tuition, living expenses and a
+   * total would otherwise produce three separate replies, and a bot that answers
+   * four times to one message is one people mute.
+   *
+   * @param {{label: string, value: string, reason: string}[]} rejected
+   */
+  labelRejected(rejected) {
+    const list = Array.isArray(rejected) ? rejected : [rejected];
+    if (!list.length) return null;
+
+    const unknown = list.filter((r) => r.reason !== 'not_in_locked_list');
+    const notAllowed = list.filter((r) => r.reason === 'not_in_locked_list');
+
+    const lines = [];
+
+    if (unknown.length === 1) {
+      lines.push(`⚠️ "${unknown[0].label}" isn't a field I know — saved as a note`);
+    } else if (unknown.length > 1) {
+      lines.push(`⚠️ Not fields I know — saved as notes: `
+        + unknown.map((r) => `"${r.label}"`).join(', '));
+    }
+
+    for (const r of notAllowed) {
+      lines.push(`⚠️ "${r.value}" isn't in the ${LABELS[r.label] || r.label} list `
+        + '— saved as a note');
+    }
+
+    return { text: lines.join('\n'), mentions: [] };
   },
 
   /** 7 — the CRM could not be reached. Sent once per lead, never per retry (S6). */

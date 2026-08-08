@@ -891,3 +891,28 @@ describe('only permitted people can move a lead', () => {
     assert.match(wa.sent.at(-1).text, /Only an admin can move a lead/);
   });
 });
+
+describe('one message in, one message out', () => {
+  test('a reply listing several things gets a single reply', async () => {
+    // Seen in a real message: a university, tuition, living expenses and a total
+    // produced four separate bot messages. A bot that answers four times to one
+    // message is one people mute.
+    makeGroup();
+    const crm = fakeCrm();
+    const wa = fakeWhatsApp();
+    const o = new Orchestrator({ crm, whatsapp: wa });
+    const parent = incoming();
+    await o.handle(parent);
+    const before = wa.sent.length;
+
+    await o.handle(incoming({
+      text: 'Northeastern University Boston\nTution - 52 Lakhs\n'
+        + 'living expenses - 60 lakhs\n\nTotal : 1.1 Cr',
+      mentions: [], quotedId: parent.id
+    }));
+
+    assert.equal(wa.sent.length - before, 1, 'exactly one reply');
+    assert.match(wa.sent.at(-1).text, /University → Northeastern University Boston/);
+    assert.match(wa.sent.at(-1).text, /Tution/, 'and it still says what it could not use');
+  });
+});
