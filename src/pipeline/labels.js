@@ -13,6 +13,7 @@ const {
   MAX_LENGTH, LOCKED_LISTS
 } = require('../crm/fields');
 const amount = require('./amount');
+const { cleanLine, cleanText } = require('./clean');
 
 /** `:` `-` and `=` are all accepted (R11.3). */
 const LABELLED_LINE = /^\s*([A-Za-z%][A-Za-z\s%]{0,29}?)\s*[:=\-–—]\s*(.+?)\s*$/;
@@ -120,11 +121,13 @@ function parse(text) {
 
   // Decided up front, because it is a property of the whole message: a single
   // figure is the amount, several figures are a breakdown with no single answer.
-  const bareAmounts = amount.findAll(text);
+  const bareAmounts = amount.findAll(cleanText(text));
   const amountIsUnambiguous = bareAmounts.length === 1;
 
-  for (const line of String(text).split('\n')) {
-    const trimmed = line.trim();
+  for (const raw of String(text).split('\n')) {
+    // Bullets and invisible joiners would otherwise defeat every rule below and
+    // end up inside the values we store.
+    const trimmed = cleanLine(raw);
     if (!trimmed) continue;
 
     const match = trimmed.match(LABELLED_LINE);

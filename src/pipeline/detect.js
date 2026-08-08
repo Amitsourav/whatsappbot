@@ -13,6 +13,7 @@ const phoneUtil = require('./phone');
 const labelParser = require('./labels');
 const { LOCKED_LISTS } = require('../crm/fields');
 const amount = require('./amount');
+const { cleanLine, cleanText } = require('./clean');
 
 /** Words that are never a person's name, even on a line of their own. */
 const NOT_A_NAME = new Set([
@@ -150,7 +151,7 @@ function looksLikeName(line) {
  * @returns {string}
  */
 function stripMentionsAndPhones(text) {
-  return String(text || '')
+  return cleanText(text)
     // WhatsApp renders mentions in the body as "@919876543210".
     .replace(/@\d[\d \t-]{6,}/g, ' ')
     .replace(/\+?\d[\d \t\-().]{8,}\d/g, ' ')
@@ -172,7 +173,7 @@ function extractName(text) {
   if (parsed.fields.full_name) return parsed.fields.full_name;
 
   for (const line of stripMentionsAndPhones(text).split('\n')) {
-    const trimmed = line.trim();
+    const trimmed = cleanLine(line);
     if (!trimmed) continue;
     // Skip lines that are labelled fields — "City: Delhi" is not a name.
     if (/^[A-Za-z%][A-Za-z\s%]{0,29}?\s*[:=\-–—]\s*\S/.test(trimmed)) continue;
@@ -195,7 +196,7 @@ function extractName(text) {
  */
 function findInstitution(text) {
   for (const line of stripMentionsAndPhones(text).split('\n')) {
-    const trimmed = line.trim().replace(/[.,;]+$/, '');
+    const trimmed = cleanLine(line).replace(/[.,;]+$/, '');
     if (!trimmed || trimmed.length > 60) continue;
     if (/^[A-Za-z%][A-Za-z\s%]{0,29}?\s*[:=\-–—]\s*\S/.test(trimmed)) continue;
     if (!INSTITUTION_WORDS.test(trimmed)) continue;

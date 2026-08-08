@@ -145,3 +145,48 @@ describe('known limit: an institution with no marker word', () => {
     assert.equal(detect.looksLikeName('Lovely Professional'), true);
   });
 });
+
+describe('bullet-list leads (real message)', () => {
+  // WhatsApp renders bullets with invisible joiners around them, so these lines
+  // begin with "•⁠  ⁠" rather than a letter. Before this was handled, every
+  // label rule failed and the junk ended up inside stored values.
+  const BULLETED = [
+    '•⁠  ⁠Student : Nihal Himsarkar',
+    '•⁠  ⁠Phone Number : 93074 28677',
+    '•⁠  ⁠Location : Maharashtra ',
+    '•⁠  ⁠Bachelors ',
+    '•⁠  ⁠Upgrad program ',
+    '•⁠  ⁠1 yr online and 3 yrs in Boston ',
+    '•⁠  ⁠52 Lacs + 60 Lacs ',
+    '•⁠  ⁠Parent - Coapplicant ',
+    '•⁠  ⁠Salaried father - 80k gross per month - 720 CIBIL ',
+    '•⁠  ⁠Mom : 30-40k per month (files ITR) - 740 CIBIL'
+  ].join('\n');
+
+  test('reads the name through the bullet', () => {
+    const r = detect.classify({ text: BULLETED, mentions: ['+918796222415'] });
+    assert.equal(r.name, 'Nihal Himsarkar');
+  });
+
+  test('reads the phone', () => {
+    const r = detect.classify({ text: BULLETED, mentions: ['+918796222415'] });
+    assert.equal(r.phone, '+919307428677');
+  });
+
+  test('stored values carry no bullet characters', () => {
+    // "•⁠ ⁠Bachelors" was being written into the CRM verbatim.
+    const r = detect.classify({ text: BULLETED, mentions: ['+918796222415'] });
+    for (const [field, value] of Object.entries(r.fields)) {
+      assert.doesNotMatch(String(value), /[•‣▪]/, `${field} contains a bullet`);
+      assert.equal(String(value), String(value).trim(), `${field} has stray spacing`);
+    }
+    assert.equal(r.fields.target_degree, 'Bachelors');
+  });
+
+  test("a parent's salary is never mistaken for the loan", () => {
+    // The message contains "80k gross per month" and "30-40k per month". Those
+    // are incomes, and treating either as the loan would be badly wrong.
+    const r = detect.classify({ text: BULLETED, mentions: ['+918796222415'] });
+    assert.equal(r.fields.loan_amount, undefined);
+  });
+});

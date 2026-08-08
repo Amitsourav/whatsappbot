@@ -40,7 +40,8 @@ const UNITS = {
  *   to store, or null when the text is not an amount.
  */
 function detect(text) {
-  const trimmed = String(text || '').trim().replace(/[.,;]+$/, '');
+  const { cleanLine } = require('./clean');
+  const trimmed = cleanLine(text).replace(/[.,;]+$/, '');
   if (!trimmed || trimmed.length > 30) return { isAmount: false, value: null };
 
   const unit = trimmed.match(WITH_UNIT);
