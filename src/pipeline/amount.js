@@ -81,11 +81,31 @@ function trimNumber(value) {
  * @returns {string|null}
  */
 function findInLines(text) {
+  const found = [];
   for (const line of String(text || '').split('\n')) {
     const { isAmount, value } = detect(line);
-    if (isAmount) return value;
+    if (isAmount && !found.includes(value)) found.push(value);
   }
+
+  // One figure is unambiguous. Several are not: a message listing 52 lakh and
+  // 60 lakh has no single "the amount", and picking the first would understate
+  // the file by half. The caller asks instead.
+  if (found.length === 1) return found[0];
   return null;
 }
 
-module.exports = { detect, findInLines };
+/**
+ * Every distinct amount in a message, for reporting an ambiguity.
+ * @param {string} text
+ * @returns {string[]}
+ */
+function findAll(text) {
+  const found = [];
+  for (const line of String(text || '').split('\n')) {
+    const { isAmount, value } = detect(line);
+    if (isAmount && !found.includes(value)) found.push(value);
+  }
+  return found;
+}
+
+module.exports = { detect, findInLines, findAll };

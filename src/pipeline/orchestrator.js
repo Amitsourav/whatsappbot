@@ -565,6 +565,15 @@ class Orchestrator {
         const refused = replies.labelRejected(parsed.rejected);
         if (refused) parts.push(refused.text);
 
+        // Several figures and no total: say so, rather than quietly recording
+        // nothing and looking like it missed the message.
+        if (!changes.some((c) => c.field === 'loan_amount')) {
+          // record.body, not `text` — applyUpdate is also called by the retry
+          // worker, where the original message is long gone.
+          const amounts = labelParser.amountCandidates(record.body, parsed.rejected);
+          if (amounts.length > 1) parts.push(replies.amountAmbiguous(amounts).text);
+        }
+
         if (parts.length) {
           await this.send(group, { text: parts.join('\n'), mentions: [] },
             rawMessage, () => repo.leadUpdates.markReplied(record.id));

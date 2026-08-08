@@ -167,6 +167,20 @@ const replies = {
   },
 
   /**
+   * 10 — several amounts, and no way to tell which is the loan.
+   *
+   * Asking beats guessing. A file written as tuition plus living expenses has no
+   * single figure, and taking the first would understate it by half.
+   */
+  amountAmbiguous(amounts) {
+    return {
+      text: `⚠️ Which is the loan amount? ${amounts.join(' · ')}\n`
+        + "Reply  Total: <amount>  and I'll set it",
+      mentions: []
+    };
+  },
+
+  /**
    * 5 — a reply set one or more CRM fields.
    *
    * A replacement is shown differently from a first value. Someone overwriting a

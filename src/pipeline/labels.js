@@ -118,6 +118,11 @@ function parse(text) {
   const result = { fields: {}, updateOnly: [], rejected: [], plain: [] };
   if (!text) return result;
 
+  // Decided up front, because it is a property of the whole message: a single
+  // figure is the amount, several figures are a breakdown with no single answer.
+  const bareAmounts = amount.findAll(text);
+  const amountIsUnambiguous = bareAmounts.length === 1;
+
   for (const line of String(text).split('\n')) {
     const trimmed = line.trim();
     if (!trimmed) continue;
@@ -125,11 +130,17 @@ function parse(text) {
     const match = trimmed.match(LABELLED_LINE);
     if (!match) {
       // A line that is entirely a money amount fills loan_amount without needing
-      // a label. Money carries markers — "lakh", "cr", "₹" — that nothing else
-      // does, so recognising it is not a guess.
+      // a label — but only when the message contains exactly one. A file written
+      // as "tuition 52 lakh / living 60 lakh / total 1.1 Cr" has no single figure
+      // to take, and picking the first would understate it by half.
       const money = amount.detect(trimmed);
-      if (money.isAmount && !result.fields.loan_amount) {
-        result.fields.loan_amount = money.value;
+      if (money.isAmount) {
+        if (amountIsUnambiguous && !result.fields.loan_amount) {
+          result.fields.loan_amount = money.value;
+          continue;
+        }
+        // Ambiguous: keep it as text so the figure is not lost.
+        result.plain.push(trimmed);
         continue;
       }
       result.plain.push(trimmed);
@@ -174,4 +185,26 @@ function parse(text) {
   return result;
 }
 
-module.exports = { parse, coerce, toIsoDate, matchLockedList };
+/**
+ * Every figure in a message that could be the loan amount.
+ *
+ * Looks at bare lines AND the values of labels we could not place — "Tution - 52
+ * Lakhs" carries a figure even though "Tution" is not a field, and a message with
+ * two such lines is exactly the ambiguous case worth asking about.
+ *
+ * @param {string} text
+ * @param {{label: string, value: string}[]} [rejected] - from parse()
+ * @returns {string[]} distinct amounts, as they would be stored
+ */
+function amountCandidates(text, rejected = []) {
+  const found = amount.findAll(text);
+
+  for (const item of rejected) {
+    const money = amount.detect(item.value);
+    if (money.isAmount && !found.includes(money.value)) found.push(money.value);
+  }
+
+  return found;
+}
+
+module.exports = { parse, coerce, toIsoDate, matchLockedList, amountCandidates };

@@ -170,10 +170,25 @@ const LABEL_MAP = {
   'countries': 'preferred_countries',
   'preferred country': 'preferred_countries',
 
-  // Loan — update-only (C11)
+  // Loan — update-only (C11).
+  //
+  // A file is often written as a breakdown: tuition, living expenses, then a
+  // total. Only the total is the loan requirement — taking the first figure
+  // would have filed a 1.1 crore case as 52 lakh.
   'loan': 'loan_amount',
   'loan amount': 'loan_amount',
+  'loan required': 'loan_amount',
+  'loan requirement': 'loan_amount',
   'amount': 'loan_amount',
+  'amount required': 'loan_amount',
+  'total': 'loan_amount',
+  'total amount': 'loan_amount',
+  'total cost': 'loan_amount',
+  'total loan': 'loan_amount',
+  'total fees': 'loan_amount',
+  'grand total': 'loan_amount',
+  'overall': 'loan_amount',
+  'requirement': 'loan_amount',
   'budget': 'loan_amount',
   'bank': 'bank_name'
 };

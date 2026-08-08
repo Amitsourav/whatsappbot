@@ -916,3 +916,44 @@ describe('one message in, one message out', () => {
     assert.match(wa.sent.at(-1).text, /Tution/, 'and it still says what it could not use');
   });
 });
+
+describe('a breakdown with a total (real message)', () => {
+  test('takes the total, keeps the components as notes, replies once', async () => {
+    makeGroup();
+    const crm = fakeCrm();
+    const wa = fakeWhatsApp();
+    const o = new Orchestrator({ crm, whatsapp: wa });
+    const parent = incoming();
+    await o.handle(parent);
+    const before = wa.sent.length;
+
+    await o.handle(incoming({
+      text: 'Northeastern University Boston\nTution - 52 Lakhs\n'
+        + 'living expenses - 60 lakhs\n\nTotal : 1.1 Cr',
+      mentions: [], quotedId: parent.id
+    }));
+
+    const written = crm.calls.updated.at(-1).fields;
+    assert.equal(written.loan_amount, '1.1 Cr', 'the total, not the first figure');
+    assert.equal(written.university, 'Northeastern University Boston');
+    assert.equal(wa.sent.length - before, 1, 'one reply');
+  });
+
+  test('with no total it asks rather than guessing', async () => {
+    makeGroup();
+    const crm = fakeCrm();
+    const wa = fakeWhatsApp();
+    const o = new Orchestrator({ crm, whatsapp: wa });
+    const parent = incoming();
+    await o.handle(parent);
+
+    await o.handle(incoming({
+      text: 'Tution - 52 Lakhs\nliving expenses - 60 lakhs',
+      mentions: [], quotedId: parent.id
+    }));
+
+    assert.match(wa.sent.at(-1).text, /Which is the loan amount\? 52 Lakh · 60 Lakh/);
+    const written = crm.calls.updated.at(-1)?.fields || {};
+    assert.equal(written.loan_amount, undefined, 'nothing guessed');
+  });
+});
