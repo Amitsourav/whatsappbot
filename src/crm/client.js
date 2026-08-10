@@ -392,21 +392,30 @@ class CrmClient {
   /**
    * Append a remark. This is the ONLY way we write notes — `lead.notes` is
    * destructive and shared with the AI call pipeline (C1).
+   *
    * @param {string} leadId
-   * @param {string} text
+   * @param {string} text - what a person will read; nothing else belongs here
+   * @param {string} [sourceId] - the originating WhatsApp message id, sent as a
+   *   field so a retry duplicate stays traceable without cluttering the note
    * @returns {Promise<Object>}
    */
   async addRemark(leadId, text, sourceId) {
     const trimmed = String(text || '').trim();
     if (!trimmed) throw new CrmError('Remark text is empty');
 
-    // The remarks endpoint is not idempotent: a retry after a timeout appends a
-    // second copy. Stamping the WhatsApp message id makes a duplicate obvious
-    // rather than mysterious, and lets a human trace it back to the message.
-    const stamped = sourceId ? `${trimmed}\n\n[wa:${sourceId}]` : trimmed;
-
-    // Their validation is 1–5000 with a clean 422; truncate rather than fail.
-    return this.request('POST', `/leads/${leadId}/remarks`, { body: stamped.slice(0, 5000) });
+    // The message id is sent as a field, never inside the body. It used to be
+    // appended as "[wa:…]" so a retry duplicate could be spotted, but that put
+    // machine bookkeeping into text counsellors read all day — and truncation
+    // ran after stamping, so the longest notes lost the stamp anyway.
+    //
+    // The CRM ignores unknown keys (C10), so this is inert until they add the
+    // column and starts working the moment they do. addBankMessage already sends
+    // wa_message_id this way, and that endpoint is idempotent on it.
+    return this.request('POST', `/leads/${leadId}/remarks`, {
+      // Their validation is 1–5000 with a clean 422; truncate rather than fail.
+      body: trimmed.slice(0, 5000),
+      wa_message_id: sourceId || undefined
+    });
   }
 
   /**

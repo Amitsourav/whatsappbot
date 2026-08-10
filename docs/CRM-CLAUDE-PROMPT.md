@@ -367,3 +367,28 @@ and know what's actually missing.
 > - No changes to `bank_status`. This is about *shared with*, not the bank's decision.
 > - No delete endpoints.
 > - Nothing that writes `lead.notes` — we are still staying away from that column.
+
+
+---
+
+## Prompt 6 — `wa_message_id` on remarks (small)
+
+> A small consistency request.
+>
+> `POST /leads/{id}/bank-shares/{bank}/messages` takes `wa_message_id` as a field
+> and is idempotent on it — exactly right, and it means a retry after a timeout
+> updates rather than appends.
+>
+> `POST /leads/{id}/remarks` has no equivalent. Because remarks are not
+> idempotent either, we had been appending the id to the note text as
+> `[wa:3EB023A5D59133FE445054]` so a duplicate could be identified. That is
+> visible to every counsellor reading the note, so we have stopped.
+>
+> Please could you:
+>
+> 1. **Accept and store `wa_message_id` on a remark.** We are already sending it
+>    as a field; it is currently ignored, so nothing breaks either way.
+> 2. **Make the endpoint idempotent on it**, matching the bank-share message
+>    endpoint — a repeat with the same id should not create a second remark.
+>
+> No response shape change needed, and nothing else about remarks should move.

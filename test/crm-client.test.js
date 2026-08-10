@@ -214,3 +214,34 @@ describe('phone is create-only (C3) — regression', () => {
     assert.ok(dropped.some((d) => d.field === 'phone' && d.reason === 'update_forbidden'));
   });
 });
+
+describe('remark bodies carry no bookkeeping', () => {
+  test('the message id is a field, not text in the note', async () => {
+    // It used to be appended as "[wa:…]", which put machine bookkeeping into
+    // text counsellors read all day.
+    const { client, calls } = mockClient(() => ({ status: 201, body: { id: 'r1' } }));
+    await client.addRemark('lead-1', 'University changed to DU', 'WAMSG123');
+
+    assert.equal(calls[0].body.body, 'University changed to DU');
+    assert.doesNotMatch(calls[0].body.body, /\[wa:/);
+    assert.equal(calls[0].body.wa_message_id, 'WAMSG123');
+  });
+
+  test('no message id means no stray key', async () => {
+    const { client, calls } = mockClient(() => ({ status: 201, body: { id: 'r1' } }));
+    await client.addRemark('lead-1', 'plain note');
+
+    assert.equal(calls[0].body.body, 'plain note');
+    assert.equal(calls[0].body.wa_message_id, undefined);
+  });
+
+  test('a long note loses its tail, not its identifier', async () => {
+    // Truncation used to run after stamping, so the longest notes — the ones most
+    // worth tracing — were exactly the ones that lost the stamp.
+    const { client, calls } = mockClient(() => ({ status: 201, body: { id: 'r1' } }));
+    await client.addRemark('lead-1', 'x'.repeat(6000), 'WAMSG123');
+
+    assert.equal(calls[0].body.body.length, 5000);
+    assert.equal(calls[0].body.wa_message_id, 'WAMSG123');
+  });
+});

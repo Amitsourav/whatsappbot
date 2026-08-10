@@ -128,6 +128,13 @@ describe('daily scheduler', () => {
 describe('follow-up reminders', () => {
   const { findFollowUps, renderFollowUps, buildMorningMessage } = require('../src/pipeline/digest');
 
+  /**
+   * Both ends of the window are pinned. Fixing only `today` leaves the overdue
+   * cutoff coming from the real clock, so these tests passed when written and
+   * then expired on their own a few days later.
+   */
+  const WINDOW = { today: '2026-08-06', overdueFrom: '2026-07-30' };
+
   const dated = (due, over = {}) => lead({ due_date: due, ...over });
 
   test('separates due today from overdue', async () => {
@@ -136,7 +143,7 @@ describe('follow-up reminders', () => {
       dated('2026-08-01T00:00:00Z', { full_name: 'Late One' }),
       lead({ full_name: 'No date' })
     ]);
-    const r = await findFollowUps(crm, { today: '2026-08-06' });
+    const r = await findFollowUps(crm, WINDOW);
 
     assert.equal(r.due.length, 1);
     assert.equal(r.overdue.length, 1);
@@ -149,7 +156,7 @@ describe('follow-up reminders', () => {
       dated('2026-08-01T00:00:00Z', { current_stage: 'lost' }),
       dated('2026-08-01T00:00:00Z', { current_stage: 'processing' })
     ]);
-    const r = await findFollowUps(crm, { today: '2026-08-06' });
+    const r = await findFollowUps(crm, WINDOW);
     assert.equal(r.overdue.length, 1);
   });
 

@@ -82,6 +82,18 @@ The key **cannot delete**: `ApiKeyDeleteGuardMiddleware` rejects any DELETE carr
 the header before routing, before auth, before any DB work. Global, so future DELETE
 routes are covered automatically. It also cannot mint or manage keys.
 
+**C15 — A message id goes in a field, never inside the note text.**
+
+`POST /leads/{id}/remarks` takes only `body`, so the originating WhatsApp message
+id was once appended to the text as `[wa:3EB023…]`. That put machine bookkeeping
+into something counsellors read all day, and truncation ran after stamping — so
+the longest notes, the ones most worth tracing, were exactly the ones that lost
+it.
+
+We now send `wa_message_id` as a sibling field. Unknown keys are ignored (C10), so
+it is inert until they add the column. `addBankMessage` already works this way and
+that endpoint is idempotent on it — remarks should match. Requested in Prompt 6.
+
 **C7 — Read `loan_amount`, never `loan_amount_lakh`.**
 
 `loan_amount_lakh` is write-only: it stores correctly but is absent from `LeadOut`,
