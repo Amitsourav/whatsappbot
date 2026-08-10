@@ -199,14 +199,18 @@ const replies = {
     parts.push(head.join(' '));
 
     if (created.length && created.length <= 5) {
-      parts.push(created.map((l) => `  ${l.name} · ${prettyPhone(l.phone)}`).join('\n'));
+      // A lead with no usable name is shown by its number — the same thing that
+      // identifies it in the CRM.
+      parts.push(created.map((l) => (l.name
+        ? `  ${l.name} · ${prettyPhone(l.phone)}`
+        : `  ${prettyPhone(l.phone)}`)).join('\n'));
     }
 
     if (existing.length) {
       parts.push('');
       parts.push(`⚠️ ${existing.length} already in the CRM`);
       for (const l of existing.slice(0, 5)) {
-        parts.push(`  ${l.name} · ${prettyPhone(l.phone)}`
+        parts.push(`  ${l.name ? `${l.name} · ` : ''}${prettyPhone(l.phone)}`
           + (l.owner ? ` · with ${l.owner}` : ''));
       }
       if (existing.length > 5) parts.push(`  …and ${existing.length - 5} more`);

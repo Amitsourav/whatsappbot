@@ -253,7 +253,7 @@ function findCourse(text, institution) {
  */
 function splitLeads(text, mentions = []) {
   const mentionSet = new Set(mentions);
-  const entries = [];
+  const rows = [];
 
   for (const raw of cleanText(text).split('\n')) {
     const line = cleanLine(raw);
@@ -265,18 +265,45 @@ function splitLeads(text, mentions = []) {
     // Two numbers on one line is a person with an alternate, not two people.
     if (phones.length > 1) return null;
 
-    // What remains once the number is removed should name someone.
-    const rest = stripMentionsAndPhones(line).trim().replace(/^[-–—:,]+|[-–—:,]+$/g, '').trim();
-    const named = rest && looksLikeName(rest);
+    // Whatever is left once the number is removed. Often a name; sometimes a
+    // placeholder like "Student", sometimes nothing at all.
+    const rest = line
+      .replace(/\+?\d[\d \t\-().]{8,}\d/g, ' ')
+      .replace(/[ \t]+/g, ' ')
+      .replace(/^[-–—:,|]+|[-–—:,|]+$/g, '')
+      .trim();
 
-    // A number with nobody attached — an alternate, or a lead written across
-    // several lines. Either way this is not a clean batch.
-    if (!named) return null;
-
-    entries.push({ name: rest.replace(/[.,;:]+$/, ''), phone: phones[0], line });
+    rows.push({
+      line,
+      phone: phones[0],
+      // looksLikeName rejects "Student", "D" and the like — correctly, since
+      // they are not names. Such a lead is created under its number, the same as
+      // any other lead with no usable name.
+      name: rest && looksLikeName(rest) ? rest.replace(/[.,;:]+$/, '') : null
+    });
   }
 
-  return entries.length > 1 ? entries : null;
+  if (rows.length < 2) return null;
+
+  const named = rows.filter((r) => r.name).length;
+
+  // Two rules, because batches come in two shapes.
+  //
+  //   Every line names someone -> a batch, even if there are only two.
+  //
+  //   Three or more lines each carrying exactly one number -> a batch, whatever
+  //   the names say. A person with three alternate numbers listed one per line
+  //   is far rarer than three leads, and this is the shape teams actually post:
+  //   a column of numbers with "Student" beside most of them.
+  //
+  // Below three, an unnamed number is treated as an alternate — that is the
+  // case where inventing a lead would put a phantom in the CRM.
+  const everyLineNamed = named === rows.length;
+  const longEnoughToBeAList = rows.length >= 3;
+
+  if (!everyLineNamed && !longEnoughToBeAList) return null;
+
+  return rows;
 }
 
 /**

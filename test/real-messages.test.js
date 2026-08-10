@@ -190,3 +190,53 @@ describe('bullet-list leads (real message)', () => {
     assert.equal(r.fields.loan_amount, undefined);
   });
 });
+
+describe('bulk lead lists (real message)', () => {
+  // Exactly as posted: number first, name second, and "Student" standing in
+  // wherever the name was not known. Fifteen leads under one tag.
+  const BULK = [
+    '917788883939    AliceKhemka',
+    '919019531381    AnuragHardi',
+    '919007717838    D',
+    '919217189006    Mehak',
+    '918604001600    sagarika',
+    '918498849836    Student',
+    '917428393768    Student',
+    '919818389738    Student',
+    '919793973660    Student',
+    '918668347106    Student'
+  ].join('\n');
+
+  test('splits into one lead per line', () => {
+    const rows = detect.splitLeads(BULK, []);
+    assert.equal(rows.length, 10);
+  });
+
+  test('reads the names that are real', () => {
+    const rows = detect.splitLeads(BULK, []);
+    assert.equal(rows[0].name, 'AliceKhemka');
+    assert.equal(rows[1].name, 'AnuragHardi');
+    assert.equal(rows[3].name, 'Mehak');
+  });
+
+  test('"Student" and "D" are not stored as names', () => {
+    // They are placeholders. Such a lead is identified by its number, like any
+    // other lead with no usable name.
+    const rows = detect.splitLeads(BULK, []);
+    assert.equal(rows[2].name, null, '"D" is too short to be a name');
+    assert.equal(rows[5].name, null, '"Student" is a placeholder');
+  });
+
+  test('every number is captured correctly', () => {
+    const rows = detect.splitLeads(BULK, []);
+    assert.equal(rows[0].phone, '+917788883939');
+    assert.equal(rows[9].phone, '+918668347106');
+  });
+
+  test('a lead with one alternate number is still NOT split', () => {
+    // The case this rule exists to protect: a phantom lead on the borrower's
+    // second number would sit in the CRM forever, assigned and never converting.
+    assert.equal(detect.splitLeads('Priya Sharma\n9876543210\nalt 9812345670', []), null);
+    assert.equal(detect.splitLeads('Priya 9876543210 9812345670', []), null);
+  });
+});
