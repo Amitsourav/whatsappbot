@@ -39,7 +39,7 @@ const wrap = (fn) => (req, res) => {
  * @param {{ whatsapp: object, crm: object, orchestrator: object }} deps
  * @returns {import('http').Server}
  */
-function createServer({ whatsapp, crm, orchestrator }) {
+function createServer({ whatsapp, crm, orchestrator, jobs = {} }) {
   const app = express();
   app.use(express.json({ limit: '256kb' }));
 
@@ -90,6 +90,26 @@ function createServer({ whatsapp, crm, orchestrator }) {
     logger.warn(`Sending ${paused ? 'PAUSED' : 'resumed'} from the admin panel`);
     res.json({ sendingPaused: paused });
   });
+
+  /**
+   * Send a scheduled report now.
+   *
+   * The same job the scheduler runs, so what you see is exactly what the group
+   * will get at 9am — not a preview that might differ. It does not touch the
+   * scheduler's record of the day, so the scheduled run still happens.
+   */
+  api.post('/reports/:name/run', wrap(async (req, res) => {
+    const job = jobs[req.params.name];
+    if (!job) {
+      return res.status(404).json({
+        error: `Unknown report. Available: ${Object.keys(jobs).join(', ')}`
+      });
+    }
+
+    logger.info(`Report "${req.params.name}" run manually from the panel`);
+    const result = await job();
+    res.json({ ok: true, sent: Boolean(result), result: result || null });
+  }));
 
   // ---- groups -------------------------------------------------------------
   api.get('/groups', wrap(async (req, res) => {

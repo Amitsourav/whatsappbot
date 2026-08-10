@@ -105,7 +105,7 @@ async function main() {
     }
   });
 
-  const server = createServer({ whatsapp, crm, orchestrator });
+  const server = createServer({ whatsapp, crm, orchestrator, jobs });
 
   server.on('error', (error) => {
     if (error.code === 'EADDRINUSE') {
@@ -128,10 +128,16 @@ async function main() {
   // Yesterday's summary, posted into each monitored group that has replies on.
   // Nothing is posted on a day with no leads — a summary reading "0" every
   // morning trains people to ignore the bot.
-  const digest = new DailyScheduler({
-    name: 'daily-summary',
-    at: process.env.DAILY_SUMMARY_AT || '09:00',
-    run: async () => {
+  /**
+   * The two scheduled reports, as named jobs.
+   *
+   * Exposed to the API as well as the scheduler: a report someone can only
+   * receive at 9am is a report they cannot check, and being able to send one now
+   * is how you find out it works without waiting a day.
+   */
+  const jobs = {};
+
+  jobs['morning-summary'] = async () => {
       if (repo.settings.get('sending_paused') === 'true') {
         logger.info('Sending is paused — skipping the daily summary');
         return;
@@ -150,16 +156,19 @@ async function main() {
 
       logger.info(`Morning message posted: ${summary.leads} lead(s), `
         + `${summary.untouched} untouched, ${summary.due} follow-up(s)`);
-    }
+      return summary;
+  };
+
+  const digest = new DailyScheduler({
+    name: 'daily-summary',
+    at: process.env.DAILY_SUMMARY_AT || '09:00',
+    run: jobs['morning-summary']
   });
   digest.start();
 
   // End-of-day login and PF report. Posted whether or not anything happened —
   // a report that only appears on good days is not a report.
-  const stageReport = new DailyScheduler({
-    name: 'stage-report',
-    at: config.stageReport.at,
-    run: async () => {
+  jobs['stage-report'] = async () => {
       if (repo.settings.get('sending_paused') === 'true') {
         logger.info('Sending is paused — skipping the stage report');
         return;
@@ -192,7 +201,13 @@ async function main() {
 
       logger.info(`Stage report posted: ${report.totals.logged_in} login(s), `
         + `${report.totals.pf_paid} PF`);
-    }
+      return report;
+  };
+
+  const stageReport = new DailyScheduler({
+    name: 'stage-report',
+    at: config.stageReport.at,
+    run: jobs['stage-report']
   });
   stageReport.start();
 
