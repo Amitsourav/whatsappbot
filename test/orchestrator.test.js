@@ -957,3 +957,108 @@ describe('a breakdown with a total (real message)', () => {
     assert.equal(written.loan_amount, undefined, 'nothing guessed');
   });
 });
+
+describe('several leads in one message', () => {
+  const batch = (over = {}) => incoming({
+    text: 'New leads @919812345678\n\nPriya Sharma 9876543210\n'
+      + 'Rahul Verma 9812345670\nAnjali Mehta 9998887776',
+    ...over
+  });
+
+  test('creates every lead, not just the first', async () => {
+    // Before this, two of three were silently dropped into a note.
+    makeGroup();
+    const crm = fakeCrm();
+    await new Orchestrator({ crm, whatsapp: fakeWhatsApp() }).handle(batch());
+
+    assert.equal(crm.calls.created.length, 3);
+    assert.deepEqual(crm.calls.created.map((c) => c.full_name),
+      ['Priya Sharma', 'Rahul Verma', 'Anjali Mehta']);
+  });
+
+  test('all assigned to the one tagged person', async () => {
+    makeGroup();
+    const crm = fakeCrm();
+    await new Orchestrator({ crm, whatsapp: fakeWhatsApp() }).handle(batch());
+
+    for (const c of crm.calls.created) assert.equal(c.assigned_agent_id, RAHUL_CRM);
+  });
+
+  test('one reply for the batch, not one per lead', async () => {
+    makeGroup();
+    const wa = fakeWhatsApp();
+    await new Orchestrator({ crm: fakeCrm(), whatsapp: wa }).handle(batch());
+
+    assert.equal(wa.sent.length, 1);
+    assert.match(wa.sent[0].text, /3 of 3 leads created/);
+  });
+
+  test('a duplicate in the batch does not stop the others', async () => {
+    // With twenty leads, some are always already in the CRM.
+    makeGroup();
+    let n = 0;
+    const crm = fakeCrm();
+    const realCreate = crm.createLead;
+    crm.createLead = async (fields) => {
+      n += 1;
+      if (n === 2) {
+        throw new DuplicateLeadError({
+          detail: 'exists', error_code: 'duplicate_lead',
+          existing_lead_id: 'dup-1', existing_lead_name: 'Rahul Verma'
+        });
+      }
+      return realCreate(fields);
+    };
+    crm.getLead = async () => ({ id: 'dup-1', current_stage: 'processing',
+      full_name: 'Rahul Verma', assigned_agent_id: RAHUL_CRM });
+    crm.users = new Map([[RAHUL_CRM, { id: RAHUL_CRM, full_name: 'Rahul Kumar' }]]);
+
+    const wa = fakeWhatsApp();
+    await new Orchestrator({ crm, whatsapp: wa }).handle(batch());
+
+    assert.match(wa.sent[0].text, /2 of 3 leads created/);
+    assert.match(wa.sent[0].text, /1 already in the CRM/);
+    assert.match(wa.sent[0].text, /Rahul Verma/);
+  });
+
+  test('a redelivered batch creates nothing twice', async () => {
+    makeGroup();
+    const crm = fakeCrm();
+    const o = new Orchestrator({ crm, whatsapp: fakeWhatsApp() });
+    const msg = batch();
+
+    await o.handle(msg);
+    await o.handle(msg);
+
+    assert.equal(crm.calls.created.length, 3);
+  });
+
+  test('an untagged batch is held once, not three times', async () => {
+    // No "@919812345678" in the body: WhatsApp only renders that when a real
+    // mention exists, and a stray number with no name is not a lead line.
+    makeGroup();
+    const crm = fakeCrm();
+    const wa = fakeWhatsApp();
+    await new Orchestrator({ crm, whatsapp: wa }).handle(incoming({
+      text: 'New leads\n\nPriya Sharma 9876543210\n'
+        + 'Rahul Verma 9812345670\nAnjali Mehta 9998887776',
+      mentions: []
+    }));
+
+    assert.equal(crm.calls.created.length, 0);
+    assert.equal(wa.sent.length, 1, 'one message about the whole batch');
+    assert.equal(repo.leads.held().length, 3, 'but every lead is kept');
+  });
+
+  test('one lead with an alternate number is NOT split', async () => {
+    // The dangerous case: a phantom lead on the borrower's second number.
+    makeGroup();
+    const crm = fakeCrm();
+    await new Orchestrator({ crm, whatsapp: fakeWhatsApp() }).handle(incoming({
+      text: 'Priya Sharma\n9876543210\nalt 9812345670'
+    }));
+
+    assert.equal(crm.calls.created.length, 1);
+    assert.equal(crm.calls.created[0].phone, '+919876543210');
+  });
+});

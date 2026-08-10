@@ -230,6 +230,56 @@ function findCourse(text, institution) {
 }
 
 /**
+ * Split a message that lists several leads into one entry each.
+ *
+ * Teams post batches — sometimes twenty names and numbers under a single tag.
+ * Taking only the first would silently drop the rest.
+ *
+ * The hard part is telling a batch from one lead with two numbers:
+ *
+ *   Priya Sharma 9876543210      Priya Sharma
+ *   Rahul Verma 9812345670       9876543210
+ *                                alt 9812345670
+ *   -> two leads                 -> one lead, one alternate
+ *
+ * The rule: split only when EVERY line carrying a number also carries a name.
+ * A bare number is an alternate, not a person, and inventing a lead for it would
+ * put a phantom in the CRM that nobody ever converts.
+ *
+ * @param {string} text
+ * @param {string[]} [mentions] - tagged people, whose numbers are not leads
+ * @returns {{name: string, phone: string, line: string}[]|null}
+ *   null when this is not a batch — the caller falls back to single-lead handling
+ */
+function splitLeads(text, mentions = []) {
+  const mentionSet = new Set(mentions);
+  const entries = [];
+
+  for (const raw of cleanText(text).split('\n')) {
+    const line = cleanLine(raw);
+    if (!line) continue;
+
+    const phones = phoneUtil.extract(line).filter((p) => !mentionSet.has(p));
+    if (phones.length === 0) continue;
+
+    // Two numbers on one line is a person with an alternate, not two people.
+    if (phones.length > 1) return null;
+
+    // What remains once the number is removed should name someone.
+    const rest = stripMentionsAndPhones(line).trim().replace(/^[-–—:,]+|[-–—:,]+$/g, '').trim();
+    const named = rest && looksLikeName(rest);
+
+    // A number with nobody attached — an alternate, or a lead written across
+    // several lines. Either way this is not a clean batch.
+    if (!named) return null;
+
+    entries.push({ name: rest.replace(/[.,;:]+$/, ''), phone: phones[0], line });
+  }
+
+  return entries.length > 1 ? entries : null;
+}
+
+/**
  * Infer the fields that can be recognised without a label.
  *
  * Shared by new leads and replies. It previously ran only on new messages, so
@@ -351,5 +401,5 @@ function classify(message) {
 
 module.exports = {
   classify, extractName, looksLikeName, stripMentionsAndPhones,
-  findInstitution, findCourse, inferFields
+  findInstitution, findCourse, inferFields, splitLeads
 };

@@ -131,6 +131,11 @@ class Orchestrator {
    * @private
    */
   async handleNewLead(message, group, rawMessage) {
+    // A message may list several leads under one tag. Handled separately,
+    // because taking only the first would silently drop the rest.
+    const batch = detect.splitLeads(message.text, message.mentions);
+    if (batch) return await this.handleBatch(batch, message, group, rawMessage);
+
     const result = detect.classify(message);
 
     if (!result.isLead) {
@@ -172,6 +177,85 @@ class Orchestrator {
     }
 
     await this.pushLead(lead, result, group, rawMessage);
+  }
+
+  /**
+   * A message listing several leads.
+   *
+   * Each is created independently — one failing, or one already existing, must
+   * not stop the others. The group gets a single reply for the batch.
+   *
+   * @private
+   */
+  async handleBatch(entries, message, group, rawMessage) {
+    const mentionedPhone = message.mentions?.[0] || null;
+    const employee = mentionedPhone ? repo.employees.byPhone(mentionedPhone) : null;
+
+    // The assignee problem is the same for the whole batch, so it is answered
+    // once rather than per lead.
+    const heldReason = message.mentions?.length === 0 ? 'no_mention'
+      : message.mentions?.length > 1 ? 'multiple_mentions'
+        : (mentionedPhone && !employee ? 'unknown_employee' : null);
+
+    const created = [];
+    const existing = [];
+    const failed = [];
+    let firstHeld = null;
+
+    for (const entry of entries) {
+      // Keyed on message id plus phone: one message, several leads, and a
+      // redelivery still creates none of them twice.
+      const lead = repo.leads.create({
+        waMessageId: `${message.id}:${entry.phone}`,
+        groupId: group.id,
+        name: entry.name,
+        phone: entry.phone,
+        senderPhone: message.senderPhone,
+        rawMessage: entry.line,
+        mentionedPhone,
+        employeeId: employee?.id || null,
+        status: heldReason ? 'held' : 'pending',
+        heldReason
+      });
+
+      if (!lead) continue; // already seen
+
+      if (heldReason) {
+        firstHeld = firstHeld || lead;
+        continue;
+      }
+
+      const outcome = await this.pushLead(lead, {
+        name: entry.name, phone: entry.phone, fields: {}, remarkText: null
+      }, null, undefined);
+
+      if (outcome?.status === 'existing') {
+        existing.push({ name: entry.name, phone: entry.phone, owner: outcome.owner });
+      } else if (outcome?.status === 'created') {
+        created.push({ name: entry.name, phone: entry.phone });
+      } else {
+        failed.push({ name: entry.name, phone: entry.phone });
+      }
+    }
+
+    if (!group) return;
+
+    // Whatever blocked the batch blocked all of it, so say it once.
+    if (heldReason && firstHeld) {
+      logger.info(`Batch of ${entries.length} held (${heldReason})`);
+      return await this.replyHeld(firstHeld, {
+        name: null, phone: null, mentions: message.mentions || []
+      }, group, rawMessage);
+    }
+
+    if (!created.length && !existing.length && !failed.length) return;
+
+    logger.info(`Batch: ${created.length} created, ${existing.length} existing, `
+      + `${failed.length} failed`);
+
+    await this.send(group, replies.batchCreated(
+      { created, existing, failed }, employee?.wa_phone
+    ), rawMessage);
   }
 
   /**
@@ -253,7 +337,7 @@ class Orchestrator {
 
     if (!employee) {
       repo.leads.markHeld(lead.id, 'unknown_employee');
-      return;
+      return { status: 'held' };
     }
 
     repo.leads.recordAttempt(lead.id);
@@ -292,6 +376,8 @@ class Orchestrator {
           name: lead.name, phone: lead.phone, employeePhone: employee.wa_phone
         }), rawMessage, () => repo.leads.markReplied(lead.id));
       }
+
+      return { status: 'created', crmLeadId: created.id };
     } catch (error) {
       if (error instanceof DuplicateLeadError) {
         // Q5 — the existing lead keeps its current owner. The message is preserved
@@ -319,7 +405,7 @@ class Orchestrator {
               stage: existing.current_stage
             }), rawMessage, () => repo.leads.markReplied(lead.id));
           }
-          return;
+          return { status: 'held', reason: `revived_${existing.current_stage}` };
         }
 
         repo.leads.markExisting(lead.id, error.existingLeadId);
@@ -346,7 +432,15 @@ class Orchestrator {
             resolveUser: (id) => (id ? this.crm.users?.get(id)?.full_name : null)
           }), rawMessage, () => repo.leads.markReplied(lead.id));
         }
-        return;
+
+        return {
+          status: 'existing',
+          crmLeadId: error.existingLeadId,
+          owner: existing
+            ? (existing.assigned_agent_name
+               || this.crm.users?.get(existing.assigned_agent_id)?.full_name)
+            : null
+        };
       }
 
       const attempts = lead.attempts + 1;
@@ -365,6 +459,8 @@ class Orchestrator {
           name: lead.name, phone: lead.phone
         }), rawMessage, () => repo.leads.markReplied(lead.id));
       }
+
+      return { status: 'failed', error: error.message };
     }
   }
 

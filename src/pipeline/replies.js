@@ -181,6 +181,46 @@ const replies = {
   },
 
   /**
+   * 11 — a message that listed several leads.
+   *
+   * One reply for the batch. Twenty lines of confirmation is not a confirmation,
+   * it is a wall — so the created ones are counted and the ones needing
+   * attention are named, because those are what someone must act on.
+   *
+   * @param {{created: object[], existing: object[], failed: object[]}} result
+   * @param {string} [employeePhone]
+   */
+  batchCreated({ created, existing, failed }, employeePhone) {
+    const parts = [];
+    const total = created.length + existing.length + failed.length;
+
+    const head = [`✅ ${created.length} of ${total} leads created`];
+    if (employeePhone) head.push(`· assigned to ${tag(employeePhone)}`);
+    parts.push(head.join(' '));
+
+    if (created.length && created.length <= 5) {
+      parts.push(created.map((l) => `  ${l.name} · ${prettyPhone(l.phone)}`).join('\n'));
+    }
+
+    if (existing.length) {
+      parts.push('');
+      parts.push(`⚠️ ${existing.length} already in the CRM`);
+      for (const l of existing.slice(0, 5)) {
+        parts.push(`  ${l.name} · ${prettyPhone(l.phone)}`
+          + (l.owner ? ` · with ${l.owner}` : ''));
+      }
+      if (existing.length > 5) parts.push(`  …and ${existing.length - 5} more`);
+    }
+
+    if (failed.length) {
+      parts.push('');
+      parts.push(`❌ ${failed.length} couldn't be saved — retrying`);
+    }
+
+    return { text: parts.join('\n'), mentions: [employeePhone].filter(Boolean) };
+  },
+
+  /**
    * 5 — a reply set one or more CRM fields.
    *
    * A replacement is shown differently from a first value. Someone overwriting a
