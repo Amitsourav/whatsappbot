@@ -45,6 +45,14 @@ async function main() {
   const orchestrator = new Orchestrator({ crm, whatsapp });
   const worker = new RetryWorker({ orchestrator });
 
+  /**
+   * The scheduled reports, as named jobs.
+   *
+   * Declared here because the API server is created before they are defined, and
+   * it holds a reference so the panel can send one on demand. Filled in below.
+   */
+  const jobs = {};
+
   if (crm.configured) {
     try {
       // Refuses to continue if the key resolves to a different company: the same
@@ -128,15 +136,8 @@ async function main() {
   // Yesterday's summary, posted into each monitored group that has replies on.
   // Nothing is posted on a day with no leads — a summary reading "0" every
   // morning trains people to ignore the bot.
-  /**
-   * The two scheduled reports, as named jobs.
-   *
-   * Exposed to the API as well as the scheduler: a report someone can only
-   * receive at 9am is a report they cannot check, and being able to send one now
-   * is how you find out it works without waiting a day.
-   */
-  const jobs = {};
-
+  // Exposed to the API as well as the scheduler: a report someone can only
+  // receive at 9am is a report they cannot check.
   jobs['morning-summary'] = async () => {
       if (repo.settings.get('sending_paused') === 'true') {
         logger.info('Sending is paused — skipping the daily summary');
