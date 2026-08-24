@@ -465,6 +465,29 @@ class CrmClient {
       });
   }
 
+  /**
+   * One person's daily metrics over the last N days, newest last.
+   *
+   * The single-day report would mean one call per person per day — 31 days times
+   * four counsellors is 124 requests against a CRM that routinely takes seconds
+   * per call. This returns the whole stretch in one.
+   *
+   * Verified against the live API: `days=24` on the 24th returned rows dated the
+   * 1st to the 24th inclusive. That boundary is not documented anywhere, so
+   * callers must still filter by date rather than trust it (see buildLoanMis).
+   *
+   * @param {string} userId - CRM profile id
+   * @param {number} days
+   * @returns {Promise<{date: string, leads_created: number,
+   *   transitions_by_stage: Object<string, number>}[]>}
+   */
+  async userDailyRange(userId, days) {
+    const rows = await this.request(
+      'GET', `/reports/daily/range?user_id=${encodeURIComponent(userId)}&days=${days}`
+    );
+    return Array.isArray(rows) ? rows : [];
+  }
+
   /** @returns {Promise<Object>} the authenticated service account */
   async whoami() {
     return this.request('GET', '/users/me');

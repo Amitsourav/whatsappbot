@@ -107,6 +107,26 @@ const config = {
       .split(',').map((s) => s.trim().toLowerCase()).filter(Boolean)
   },
 
+  /**
+   * The daily loan MIS: month-to-date figures per counsellor, against a target.
+   *
+   * Shares the stage report's agent list by default — they are the same four
+   * people, and keeping one list means adding a counsellor is one change, not two.
+   *
+   * `pfTarget` is a MONTHLY target per person. The CRM has no PF target field
+   * (`target_call_count` is a call target, and is null in live data), so it lives
+   * here — a Railway variable, changeable without a deploy, which matters because
+   * a target is a management decision that moves.
+   */
+  misReport: {
+    at: process.env.MIS_REPORT_AT || '18:58',
+    agents: (process.env.MIS_REPORT_AGENTS || process.env.STAGE_REPORT_AGENTS
+      || 'ankit@fundmycampus.com,hbhatia4216@gmail.com,'
+       + 'zaid@fundmycampus.com,fundmycampus@gmail.com')
+      .split(',').map((s) => s.trim().toLowerCase()).filter(Boolean),
+    pfTarget: int(process.env.PF_TARGET, 10)
+  },
+
   /** Duplicate suppression window, in minutes. */
   dedupeWindowMinutes: int(process.env.DEDUPE_WINDOW_MINUTES, 10)
 };

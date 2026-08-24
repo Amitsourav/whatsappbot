@@ -296,3 +296,131 @@ describe('end-of-day login and PF report', () => {
     assert.match(r.text, /Himanshu\s+\(no data\)/);
   });
 });
+
+describe('loan MIS (month to date)', () => {
+  const { buildLoanMis } = require('../src/pipeline/digest');
+
+  /**
+   * A CRM double whose range report returns scripted per-day rows.
+   * @param {Object<string, object[]>} byAgent - profile id -> daily rows
+   */
+  function rangeCrm(byAgent) {
+    return {
+      users: new Map(),
+      calls: [],
+      async userDailyRange(userId, days) {
+        this.calls.push({ userId, days });
+        if (!(userId in byAgent)) throw new Error('no such user');
+        return byAgent[userId];
+      }
+    };
+  }
+
+  const day = (date, leads, moves = {}) =>
+    ({ date, leads_created: leads, transitions_by_stage: moves });
+
+  const AGENTS = [{ id: 'a1', name: 'Ankit' }, { id: 'a2', name: 'Zaid' }];
+
+  test('sums the month, not just the day', async () => {
+    const crm = rangeCrm({
+      a1: [
+        day('2026-08-01', 3, { logged_in: 2, sanctioned: 1 }),
+        day('2026-08-02', 4, { logged_in: 1, pf_paid: 2 })
+      ],
+      a2: [day('2026-08-01', 1, { logged_in: 1 })]
+    });
+    const r = await buildLoanMis(crm, AGENTS, { today: '2026-08-02', pfTarget: 10 });
+
+    assert.match(r.text, /Leads: 7 \| Login: 3 \| Sanction: 1 \| PF: 2/);
+    assert.deepEqual(r.totals,
+      { leads: 8, logged_in: 4, sanctioned: 1, pf_paid: 2, teamTarget: 20 });
+  });
+
+  test('asks for exactly the days elapsed this month', async () => {
+    // Requesting more would reach into last month and inflate every figure.
+    const crm = rangeCrm({ a1: [], a2: [] });
+    await buildLoanMis(crm, AGENTS, { today: '2026-08-17', pfTarget: 10 });
+
+    assert.deepEqual(crm.calls.map((c) => c.days), [17, 17]);
+  });
+
+  test('a row from last month is excluded even if the API returns it', async () => {
+    // The endpoint's day window is undocumented, so the boundary is enforced on
+    // our side rather than trusted.
+    const crm = rangeCrm({
+      a1: [day('2026-07-31', 99, { pf_paid: 99 }), day('2026-08-01', 2, { pf_paid: 1 })],
+      a2: []
+    });
+    const r = await buildLoanMis(crm, AGENTS, { today: '2026-08-01', pfTarget: 10 });
+
+    assert.equal(r.totals.leads, 2);
+    assert.equal(r.totals.pf_paid, 1);
+  });
+
+  test('achievement and required PF are measured against the target', async () => {
+    const crm = rangeCrm({ a1: [day('2026-08-01', 0, { pf_paid: 3 })], a2: [] });
+    const r = await buildLoanMis(crm, AGENTS, { today: '2026-08-01', pfTarget: 10 });
+
+    assert.match(r.text, /PF Target: 10 \| Achievement: 30%/);
+    assert.match(r.text, /Required: 7 PF/);
+  });
+
+  test('beating the target never asks for a negative number of PF', async () => {
+    const crm = rangeCrm({ a1: [day('2026-08-01', 0, { pf_paid: 14 })], a2: [] });
+    const r = await buildLoanMis(crm, AGENTS, { today: '2026-08-01', pfTarget: 10 });
+
+    assert.match(r.text, /Achievement: 140%/);
+    assert.match(r.text, /Required: 0 PF/);
+  });
+
+  test('a conversion rate with no logins reads as a dash, not 0%', async () => {
+    // "0%" against zero logins reads as failure when the honest answer is that
+    // there is nothing to convert yet.
+    const crm = rangeCrm({ a1: [day('2026-08-01', 5, {})], a2: [] });
+    const r = await buildLoanMis(crm, AGENTS, { today: '2026-08-01', pfTarget: 10 });
+
+    assert.match(r.text, /Login→PF: —/);
+  });
+
+  test('an unreachable counsellor is shown as such, not as zero', async () => {
+    // Reporting a failed call as "did nothing" is a lie about someone's month.
+    const crm = rangeCrm({ a1: [day('2026-08-01', 2, { pf_paid: 1 })] });
+    const r = await buildLoanMis(crm, AGENTS, { today: '2026-08-01', pfTarget: 10 });
+
+    assert.match(r.text, /Zaid\n\(no data/);
+    // ...and they do not drag the team target up for a month that was never theirs.
+    assert.equal(r.totals.teamTarget, 10);
+  });
+
+  test('underscores in a CRM name are removed', async () => {
+    // WhatsApp reads a matched pair of underscores as italics, so two such names
+    // in one message would silently italicise everything between them.
+    const crm = rangeCrm({ u1: [day('2026-08-01', 1, {})], u2: [day('2026-08-01', 1, {})] });
+    const r = await buildLoanMis(crm, [
+      { id: 'u1', name: 'Ankit_Dubey' }, { id: 'u2', name: 'Ravi_Kumar' }
+    ], { today: '2026-08-01', pfTarget: 10 });
+
+    assert.match(r.text, /👤 Ankit Dubey/);
+    assert.doesNotMatch(r.text, /_/);
+  });
+
+  test('the team block reports PF against the summed target', async () => {
+    const crm = rangeCrm({
+      a1: [day('2026-08-01', 5, { logged_in: 4, pf_paid: 2 })],
+      a2: [day('2026-08-01', 3, { logged_in: 6, pf_paid: 1 })]
+    });
+    const r = await buildLoanMis(crm, AGENTS, { today: '2026-08-01', pfTarget: 10 });
+
+    assert.match(r.text, /PF: 3\/20/);
+    assert.match(r.text, /🎯 Achievement: 15%/);
+    assert.match(r.text, /📈 Login→PF: 30%/);
+  });
+
+  test('the date is shown in full, since the report is filed and compared', async () => {
+    const crm = rangeCrm({ a1: [], a2: [] });
+    const r = await buildLoanMis(crm, AGENTS, { today: '2026-08-24', pfTarget: 10 });
+
+    assert.match(r.text, /📅 24 Aug 2026/);
+    assert.match(r.text, /\*Daily Loan MIS\*/);
+  });
+});

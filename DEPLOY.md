@@ -73,17 +73,32 @@ Service → **Variables**. Copy the values from your local `.env`.
 | `CRM_SERVICE_PROFILE_ID` | `06f48ea0-4844-4601-8331-6c33e8528a2f` |
 | `TZ_DISPLAY` | `Asia/Kolkata` |
 | `LOG_LEVEL` | `info` |
+| `PF_TARGET` | monthly PF target per counsellor, e.g. `10` |
+| `MIS_REPORT_AT` | `18:58` — when the Daily Loan MIS posts |
 
 Do **not** set `PORT` — Railway provides it.
+
+`PF_TARGET` is the **monthly** PF target for one counsellor. The team target in
+the MIS is this number times the counsellors reported, so changing it changes both.
+It lives here rather than in the CRM because the CRM has no PF target field, and
+because a target is a management decision that moves — a Railway variable changes
+without a deploy.
 
 `CRM_EXPECTED_COMPANY_ID` is a safety catch: if the key ever points at a different
 company, the bot refuses to start rather than writing leads into the wrong place.
 
 ## 5. Deploy
 
+The service is connected to the GitHub repo `Amitsourav/whatsappbot`, branch
+`main`, so **a push is the deploy**:
+
 ```bash
-railway up
+git push origin main
 ```
+
+`railway up` uploads the local folder instead, and is only the right command
+before the GitHub connection exists. Once connected, using it puts code on the
+server that is not in the repo — which is how a deploy stops being reproducible.
 
 Watch the logs. A good start looks like:
 

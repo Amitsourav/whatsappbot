@@ -296,6 +296,159 @@ async function buildStageReport(crm, agents, options = {}) {
   return { text: lines.join('\n'), totals };
 }
 
+/**
+ * The stages the loan MIS counts, and how they are labelled.
+ *
+ * Sanction sits between login and PF, so a row reads as a funnel left to right.
+ */
+const MIS_STAGES = [
+  ['logged_in', 'Login'],
+  ['sanctioned', 'Sanction'],
+  ['pf_paid', 'PF']
+];
+
+/**
+ * A percentage, or a dash when the denominator makes it meaningless.
+ *
+ * Nobody is served by "0% conversion" against zero logins — it reads as failure
+ * when the honest answer is that there is nothing to convert yet.
+ *
+ * @param {number} part
+ * @param {number} whole
+ * @returns {string}
+ */
+function percent(part, whole) {
+  if (!whole) return '—';
+  return `${Math.round((part / whole) * 100)}%`;
+}
+
+/**
+ * CRM display names, made safe to put in a WhatsApp message.
+ *
+ * Live names include "Ankit_Dubey". WhatsApp reads a matched pair of underscores
+ * as italics, so two such names in one message silently italicise everything
+ * between them — the report would render wrong and nobody would know why.
+ *
+ * @param {string} name
+ * @returns {string}
+ */
+function safeName(name) {
+  return String(name || '').replace(/_/g, ' ').trim();
+}
+
+/**
+ * The daily loan MIS: month-to-date performance per counsellor, against target.
+ *
+ * Month-to-date rather than same-day, because a PF target is monthly and a single
+ * day's figure says nothing about whether it will be met. The point of the report
+ * is the gap: how many PF are still required, and at what conversion rate.
+ *
+ * Figures come from the CRM's own per-day metrics, summed here. `leads_created`
+ * is a count of leads; the rest are stage TRANSITIONS during the month — so a
+ * lead that moved login → sanction → PF in one month is counted in all three.
+ * That is the intended reading of a funnel MIS, not double counting.
+ *
+ * @param {import('../crm/client').CrmClient} crm
+ * @param {{id: string, name: string}[]} agents
+ * @param {{ today?: string, pfTarget?: number }} [options]
+ * @returns {Promise<{text: string, totals: Object, rows: Object[]}|null>}
+ */
+async function buildLoanMis(crm, agents, options = {}) {
+  const today = options.today || dateKey(0);
+  const pfTarget = options.pfTarget ?? config.misReport.pfTarget;
+
+  // "Month to date" is the 1st of the current month up to today, inclusive.
+  const monthStart = `${today.slice(0, 7)}-01`;
+  const daysElapsed = Number(today.slice(8, 10));
+
+  const rows = [];
+
+  for (const agent of agents) {
+    const days = await crm.userDailyRange(agent.id, daysElapsed).catch((error) => {
+      logger.warn(`MIS range failed for ${agent.name}: ${error.message}`);
+      return null;
+    });
+
+    if (!days) {
+      // Unreachable is not the same as zero. A broken call reported as a zero day
+      // is a lie that looks exactly like a bad month.
+      rows.push({ name: safeName(agent.name), reachable: false, leads: 0, counts: {} });
+      continue;
+    }
+
+    // The endpoint's day window is undocumented, so the month boundary is
+    // enforced here rather than trusted — a range that quietly reached back into
+    // last month would inflate every figure in the report.
+    const mtd = days.filter((d) => d.date >= monthStart && d.date <= today);
+
+    const counts = Object.fromEntries(MIS_STAGES.map(([key]) => [key, 0]));
+    let leads = 0;
+
+    for (const day of mtd) {
+      leads += day.leads_created || 0;
+      const moves = day.transitions_by_stage || {};
+      for (const [key] of MIS_STAGES) counts[key] += moves[key] || 0;
+    }
+
+    rows.push({ name: safeName(agent.name), reachable: true, leads, counts });
+  }
+
+  if (!rows.length) return null;
+
+  const totals = {
+    leads: rows.reduce((sum, r) => sum + r.leads, 0),
+    ...Object.fromEntries(MIS_STAGES.map(([key]) =>
+      [key, rows.reduce((sum, r) => sum + (r.counts[key] || 0), 0)]))
+  };
+
+  // Only people we could actually read count towards the team target, so an
+  // unreachable counsellor does not make the team look short of a target that
+  // was never theirs to miss.
+  const teamTarget = pfTarget * rows.filter((r) => r.reachable).length;
+
+  const lines = ['*Daily Loan MIS*', '', `📅 ${formatFullDay(today)}`, ''];
+
+  for (const row of rows) {
+    lines.push(`👤 ${row.name}`);
+
+    if (!row.reachable) {
+      lines.push('(no data — could not read the CRM)');
+      lines.push('');
+      continue;
+    }
+
+    const pf = row.counts.pf_paid;
+    const login = row.counts.logged_in;
+
+    lines.push(`Leads: ${row.leads} | Login: ${login} | `
+      + `Sanction: ${row.counts.sanctioned} | PF: ${pf}`);
+    lines.push(`🎯 PF Target: ${pfTarget} | Achievement: ${percent(pf, pfTarget)}`);
+    lines.push(`📈 Login→PF: ${percent(pf, login)} | `
+      + `Required: ${Math.max(0, pfTarget - pf)} PF`);
+    lines.push('');
+  }
+
+  lines.push('━━━━━━━━━━━━━━━━━━');
+  lines.push('👥 TEAM MTD');
+  lines.push('');
+  lines.push(`Leads: ${totals.leads}`);
+  lines.push(`Login: ${totals.logged_in}`);
+  lines.push(`Sanction: ${totals.sanctioned}`);
+  lines.push(`PF: ${totals.pf_paid}/${teamTarget}`);
+  lines.push(`🎯 Achievement: ${percent(totals.pf_paid, teamTarget)}`);
+  lines.push(`📈 Login→PF: ${percent(totals.pf_paid, totals.logged_in)}`);
+
+  return { text: lines.join('\n'), totals: { ...totals, teamTarget }, rows };
+}
+
+/** "24 Aug 2026" — the MIS carries the full date, since it is filed and compared. */
+function formatFullDay(key) {
+  const [y, m, d] = key.split('-').map(Number);
+  return new Intl.DateTimeFormat('en-GB',
+    { day: '2-digit', month: 'short', year: 'numeric' })
+    .format(new Date(Date.UTC(y, m - 1, d)));
+}
+
 /** "5 Aug" — short, since the message is read the next morning. */
 function formatDay(key) {
   const [y, m, d] = key.split('-').map(Number);
@@ -345,5 +498,6 @@ async function buildMyLeads(crm, profileId) {
 
 module.exports = {
   buildDailySummary, buildMyLeads, buildMorningMessage, buildStageReport,
-  findFollowUps, renderFollowUps, dateKey, leadDate, REPORTED_STAGES
+  buildLoanMis, findFollowUps, renderFollowUps, dateKey, leadDate,
+  REPORTED_STAGES, MIS_STAGES, percent, safeName
 };

@@ -181,3 +181,65 @@ resolved from the cached user list, because the single-lead response does not
 always populate them.
 
 Assignment is still never changed, and the message is still saved as a remark.
+
+
+---
+
+## Amendment, 2026-08-24 — the Daily Loan MIS
+
+A second evening message, posted alongside the Login & PF report. Where that one
+counts what moved **today**, this one tracks the **month to date** against a
+target — because a PF target is monthly, and a single day's figure says nothing
+about whether it will be met.
+
+```
+*Daily Loan MIS*
+
+📅 24 Aug 2026
+
+👤 Ankit Dubey
+Leads: 31 | Login: 15 | Sanction: 7 | PF: 1
+🎯 PF Target: 10 | Achievement: 10%
+📈 Login→PF: 7% | Required: 9 PF
+
+👤 Himanshu
+Leads: 31 | Login: 10 | Sanction: 3 | PF: 1
+🎯 PF Target: 10 | Achievement: 10%
+📈 Login→PF: 10% | Required: 9 PF
+
+━━━━━━━━━━━━━━━━━━
+👥 TEAM MTD
+
+Leads: 103
+Login: 37
+Sanction: 13
+PF: 3/40
+🎯 Achievement: 8%
+📈 Login→PF: 8%
+```
+
+**Where the numbers come from.** `GET /reports/daily/range?user_id=&days=N`, one
+call per counsellor, summed on our side. `days` is set to the day of the month, so
+the range is the 1st to today — but the returned rows are filtered by date anyway,
+because that boundary is undocumented and a range quietly reaching into last month
+would inflate every figure in the report.
+
+**Leads is a count of leads created. Login, Sanction and PF are stage
+transitions** during the month. A lead that moved login → sanction → PF in one
+month appears in all three. That is how a funnel MIS is meant to read.
+
+**A dash, not a zero, where a percentage would mislead.** Login→PF with no logins
+is `—`, not `0%`. Zero percent reads as failure; the honest answer is that there is
+nothing to convert yet.
+
+**Unreachable is not zero.** If the CRM call for one person fails, that row says
+`(no data)` and they are left out of the team target — reporting a failed lookup as
+"did nothing" is a lie about someone's month.
+
+**Targets are not in the CRM.** `target_call_count` exists on the daily report but
+is a *call* target and is null in live data. `PF_TARGET` is therefore a Railway
+variable: one monthly number per person, and the team target is that number times
+the counsellors actually reported.
+
+Posted only in the in-house group, and skipped entirely when the kill switch (S4)
+is on — same rules as every other message here.

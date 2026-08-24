@@ -15,7 +15,7 @@ const { WhatsAppClient } = require('./whatsapp/client');
 const { Orchestrator } = require('./pipeline/orchestrator');
 const { RetryWorker } = require('./pipeline/worker');
 const { DailyScheduler } = require('./pipeline/scheduler');
-const { buildMorningMessage, buildStageReport } = require('./pipeline/digest');
+const { buildMorningMessage, buildStageReport, buildLoanMis } = require('./pipeline/digest');
 const { createServer } = require('./api/server');
 
 async function main() {
@@ -52,6 +52,34 @@ async function main() {
    * it holds a reference so the panel can send one on demand. Filled in below.
    */
   const jobs = {};
+
+  /**
+   * Turn configured emails into CRM agents.
+   *
+   * Resolved from the live user list on every run, so a renamed or re-created CRM
+   * account does not silently drop someone out of a report.
+   *
+   * @param {string[]} emails
+   * @param {string} reportName - named in the log, so it is clear which report lost someone
+   * @returns {{id: string, name: string}[]}
+   */
+  const resolveAgents = (emails, reportName) => {
+    const agents = emails
+      .map((email) => [...(crm.users?.values() || [])]
+        .find((u) => u.email.toLowerCase() === email))
+      .filter(Boolean)
+      .map((u) => ({ id: u.id, name: u.full_name }));
+
+    const missing = emails.length - agents.length;
+    if (missing > 0) {
+      logger.warn(`${missing} configured agent(s) not found in the CRM for the ${reportName}`);
+    }
+    if (!agents.length) {
+      logger.error(`No agents resolved — ${reportName} skipped`);
+    }
+
+    return agents;
+  };
 
   if (crm.configured) {
     try {
@@ -175,22 +203,8 @@ async function main() {
         return;
       }
 
-      // Resolved from the live user list each time, so a renamed or re-created
-      // CRM account does not silently drop someone from the report.
-      const agents = config.stageReport.agents
-        .map((email) => [...(crm.users?.values() || [])]
-          .find((u) => u.email.toLowerCase() === email))
-        .filter(Boolean)
-        .map((u) => ({ id: u.id, name: u.full_name }));
-
-      const missing = config.stageReport.agents.length - agents.length;
-      if (missing > 0) {
-        logger.warn(`${missing} configured report agent(s) not found in the CRM`);
-      }
-      if (!agents.length) {
-        logger.error('No report agents resolved — stage report skipped');
-        return;
-      }
+      const agents = resolveAgents(config.stageReport.agents, 'stage report');
+      if (!agents.length) return;
 
       const report = await buildStageReport(crm, agents);
       if (!report) return;
@@ -212,6 +226,38 @@ async function main() {
   });
   stageReport.start();
 
+  // The month-to-date loan MIS. Like the stage report, it posts on a flat day
+  // too — a target is only useful if the gap to it is visible every evening.
+  jobs['loan-mis'] = async () => {
+      if (repo.settings.get('sending_paused') === 'true') {
+        logger.info('Sending is paused — skipping the loan MIS');
+        return;
+      }
+
+      const agents = resolveAgents(config.misReport.agents, 'loan MIS');
+      if (!agents.length) return;
+
+      const report = await buildLoanMis(crm, agents);
+      if (!report) return;
+
+      for (const group of repo.groups.active()) {
+        if (!group.send_enabled || group.purpose !== 'inhouse') continue;
+        await whatsapp.reply({ groupId: group.wa_group_id, text: report.text });
+      }
+
+      logger.info(`Loan MIS posted: ${report.totals.leads} lead(s), `
+        + `${report.totals.logged_in} login, ${report.totals.sanctioned} sanction, `
+        + `${report.totals.pf_paid}/${report.totals.teamTarget} PF`);
+      return report;
+  };
+
+  const loanMis = new DailyScheduler({
+    name: 'loan-mis',
+    at: config.misReport.at,
+    run: jobs['loan-mis']
+  });
+  loanMis.start();
+
   // WhatsApp last, and non-blocking: if it fails, the panel is still up to fix it.
   whatsapp.connect({ pairingPhone: process.env.WA_PAIRING_PHONE }).catch((error) => {
     logger.error(`WhatsApp failed to start: ${error.message}`);
@@ -227,6 +273,7 @@ async function main() {
     worker.stop();
     digest.stop();
     stageReport.stop();
+    loanMis.stop();
     await whatsapp.disconnect().catch(() => {});
     await new Promise((resolve) => server.close(resolve));
     db.close();
