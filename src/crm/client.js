@@ -81,9 +81,14 @@ class CrmClient {
 
   /**
    * Issue a request, retrying transport failures and 5xx with exponential backoff.
+   *
+   * `options.timeoutMs` overrides the default per-attempt timeout. The reporting
+   * endpoints need it: they sit at 40-45s against a 45s default, so a call that
+   * normally succeeds randomly tips over and retries at full cost.
+   *
    * @private
    */
-  async request(method, path, body) {
+  async request(method, path, body, options = {}) {
     if (method === 'DELETE') {
       // Our own rule, enforced before the CRM's middleware ever sees it.
       throw new CrmError('The integration never issues DELETE');
@@ -105,7 +110,7 @@ class CrmClient {
             Accept: 'application/json'
           },
           body: body === undefined ? undefined : JSON.stringify(body),
-          signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS)
+          signal: AbortSignal.timeout(options.timeoutMs || REQUEST_TIMEOUT_MS)
         });
       } catch (error) {
         // Network-level failure. We cannot tell whether the server processed it,
@@ -482,8 +487,12 @@ class CrmClient {
    *   transitions_by_stage: Object<string, number>}[]>}
    */
   async userDailyRange(userId, days) {
+    // 120s, not the default 45s. Measured at 40-45s per call, so the default left
+    // no margin: a normal call would occasionally exceed it and retry, and one
+    // such retry storm cost 330s and still came back empty.
     const rows = await this.request(
-      'GET', `/reports/daily/range?user_id=${encodeURIComponent(userId)}&days=${days}`
+      'GET', `/reports/daily/range?user_id=${encodeURIComponent(userId)}&days=${days}`,
+      undefined, { timeoutMs: 120_000 }
     );
     return Array.isArray(rows) ? rows : [];
   }

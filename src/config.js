@@ -94,24 +94,13 @@ const config = {
     .split(',').map((s) => s.trim()).filter(Boolean),
 
   /**
-   * The end-of-day login and PF report: who is listed, and when it posts.
-   *
-   * Identified by CRM email rather than name or profile id — emails are stable,
-   * names get edited, and ids differ between tenants.
-   */
-  stageReport: {
-    at: process.env.STAGE_REPORT_AT || '18:58',
-    agents: (process.env.STAGE_REPORT_AGENTS
-      || 'ankit@fundmycampus.com,hbhatia4216@gmail.com,'
-       + 'zaid@fundmycampus.com,fundmycampus@gmail.com')
-      .split(',').map((s) => s.trim().toLowerCase()).filter(Boolean)
-  },
-
-  /**
    * The daily loan MIS: month-to-date figures per counsellor, against a target.
    *
-   * Shares the stage report's agent list by default — they are the same four
-   * people, and keeping one list means adding a counsellor is one change, not two.
+   * Counsellors are identified by CRM email rather than name or profile id —
+   * emails are stable, names get edited, and ids differ between tenants.
+   * STAGE_REPORT_AGENTS is still honoured: it named these same four people for
+   * the login-and-PF report this one replaced, so an existing deployment that
+   * sets it keeps working.
    *
    * `pfTarget` is a MONTHLY target per person. The CRM has no PF target field
    * (`target_call_count` is a call target, and is null in live data), so it lives

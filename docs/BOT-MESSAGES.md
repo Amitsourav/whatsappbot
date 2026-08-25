@@ -243,3 +243,30 @@ the counsellors actually reported.
 
 Posted only in the in-house group, and skipped entirely when the kill switch (S4)
 is on — same rules as every other message here.
+
+
+---
+
+## Amendment, 2026-08-25 — the Login & PF report is retired
+
+The same-day login-and-PF message is gone. The MIS shows the same two stages with
+sanction, leads and targets alongside them, so the older report was a subset
+arriving as a second message every evening — and two posts a night is how a bot
+becomes something people scroll past.
+
+Two faults died with it, both visible in the last one it sent:
+
+```
+Ankit_Dubey  1 login
+Himanshu     —
+```
+
+The underscore came straight from the CRM, and WhatsApp reads a matched pair as
+italics. The columns were padded with `padEnd`, which assumes a monospace font
+WhatsApp does not use, so they never lined up on a phone. The MIS avoids both:
+it strips underscores, and it puts each figure on its own labelled line rather
+than trying to build a table out of spaces.
+
+`scheduler:stage-report:lastRun` is left behind in the settings table. It is inert
+— nothing reads it — and deleting rows from a live database to tidy up is not
+worth the risk.

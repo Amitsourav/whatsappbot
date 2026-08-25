@@ -230,73 +230,6 @@ async function buildMorningMessage(crm, options = {}) {
 }
 
 /**
- * The stages this report is about.
- *
- * Deliberately only two. Contacted and DNP measure activity; a bank login and a
- * paid processing fee are the two points where a file has actually moved
- * forward, and those are what the owner wants seen every evening.
- */
-const REPORTED_STAGES = [
-  ['logged_in', 'login'],
-  ['pf_paid', 'PF']
-];
-
-/**
- * The end-of-day login and PF report.
- *
- * Uses the CRM's own per-user daily report, which counts stage transitions on a
- * given day — so this is what each person actually moved today, not the standing
- * total.
- *
- * People with nothing are still listed. A name against a dash is the point of a
- * team report; hiding it would make the report only ever good news.
- *
- * @param {import('../crm/client').CrmClient} crm
- * @param {{id: string, name: string}[]} agents
- * @param {{ day?: string }} [options]
- * @returns {Promise<{text: string, totals: Object}|null>}
- */
-async function buildStageReport(crm, agents, options = {}) {
-  const day = options.day || dateKey(0);
-  const rows = [];
-  const totals = Object.fromEntries(REPORTED_STAGES.map(([key]) => [key, 0]));
-
-  for (const agent of agents) {
-    const report = await crm
-      .request('GET', `/reports/daily?user_id=${agent.id}&date=${day}`)
-      .catch(() => null);
-
-    const moves = report?.metrics?.transitions_by_stage || {};
-    const counts = {};
-    for (const [key] of REPORTED_STAGES) {
-      counts[key] = moves[key] || 0;
-      totals[key] += counts[key];
-    }
-    rows.push({ name: agent.name, counts, reachable: Boolean(report) });
-  }
-
-  if (!rows.length) return null;
-
-  const lines = [`📈 ${formatDay(day)} — Login & PF`, ''];
-
-  for (const row of rows) {
-    const parts = REPORTED_STAGES
-      .filter(([key]) => row.counts[key] > 0)
-      .map(([key, label]) => `${row.counts[key]} ${label}`);
-
-    lines.push(`${row.name.padEnd(12)} ${parts.length ? parts.join(' · ')
-      : (row.reachable ? '—' : '(no data)')}`);
-  }
-
-  const summary = REPORTED_STAGES
-    .map(([key, label]) => `${totals[key]} ${label}`)
-    .join(' · ');
-  lines.push('', `Today: ${summary}`);
-
-  return { text: lines.join('\n'), totals };
-}
-
-/**
  * The stages the loan MIS counts, and how they are labelled.
  *
  * Sanction sits between login and PF, so a row reads as a funnel left to right.
@@ -361,19 +294,25 @@ async function buildLoanMis(crm, agents, options = {}) {
   const monthStart = `${today.slice(0, 7)}-01`;
   const daysElapsed = Number(today.slice(8, 10));
 
-  const rows = [];
-
-  for (const agent of agents) {
-    const days = await crm.userDailyRange(agent.id, daysElapsed).catch((error) => {
+  // Fetched concurrently, not one after another. This endpoint takes 40s+ per
+  // person and occasionally far longer, so sequential fetching made the whole
+  // report a function of the SUM of four slow calls — measured at 7m 40s once a
+  // single agent hit the timeout and retried, which put the message three
+  // minutes behind the report it sits beside. In parallel it is the slowest one
+  // alone, around 45s. Four concurrent requests is no load worth worrying about.
+  const settled = await Promise.all(agents.map((agent) =>
+    crm.userDailyRange(agent.id, daysElapsed).catch((error) => {
       logger.warn(`MIS range failed for ${agent.name}: ${error.message}`);
       return null;
-    });
+    })));
+
+  const rows = agents.map((agent, i) => {
+    const days = settled[i];
 
     if (!days) {
       // Unreachable is not the same as zero. A broken call reported as a zero day
       // is a lie that looks exactly like a bad month.
-      rows.push({ name: safeName(agent.name), reachable: false, leads: 0, counts: {} });
-      continue;
+      return { name: safeName(agent.name), reachable: false, leads: 0, counts: {} };
     }
 
     // The endpoint's day window is undocumented, so the month boundary is
@@ -390,8 +329,8 @@ async function buildLoanMis(crm, agents, options = {}) {
       for (const [key] of MIS_STAGES) counts[key] += moves[key] || 0;
     }
 
-    rows.push({ name: safeName(agent.name), reachable: true, leads, counts });
-  }
+    return { name: safeName(agent.name), reachable: true, leads, counts };
+  });
 
   if (!rows.length) return null;
 
@@ -497,7 +436,7 @@ async function buildMyLeads(crm, profileId) {
 }
 
 module.exports = {
-  buildDailySummary, buildMyLeads, buildMorningMessage, buildStageReport,
-  buildLoanMis, findFollowUps, renderFollowUps, dateKey, leadDate,
-  REPORTED_STAGES, MIS_STAGES, percent, safeName
+  buildDailySummary, buildMyLeads, buildMorningMessage, buildLoanMis,
+  findFollowUps, renderFollowUps, dateKey, leadDate,
+  MIS_STAGES, percent, safeName
 };

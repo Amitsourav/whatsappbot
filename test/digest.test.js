@@ -240,63 +240,6 @@ describe('the morning message', () => {
   });
 });
 
-describe('end-of-day login and PF report', () => {
-  const { buildStageReport } = require('../src/pipeline/digest');
-
-  /** A CRM double whose daily report returns scripted transitions. */
-  function reportingCrm(byAgent) {
-    return {
-      users: new Map(),
-      async request(method, path) {
-        const id = new URL('http://x' + path).searchParams.get('user_id');
-        if (!(id in byAgent)) return null;
-        return { metrics: { transitions_by_stage: byAgent[id] } };
-      }
-    };
-  }
-
-  const AGENTS = [
-    { id: 'a1', name: 'Ankit' }, { id: 'a2', name: 'Himanshu' },
-    { id: 'a3', name: 'Zaid' }, { id: 'a4', name: 'Rudra' }
-  ];
-
-  test('counts only login and PF, ignoring other activity', async () => {
-    // Contacted and DNP measure effort; a login and a paid fee are where a file
-    // has actually moved forward.
-    const crm = reportingCrm({
-      a1: { contacted: 12, dnp: 5 },
-      a2: { logged_in: 2, contacted: 3 },
-      a3: { logged_in: 1, pf_paid: 1 },
-      a4: {}
-    });
-    const r = await buildStageReport(crm, AGENTS, { day: '2026-08-05' });
-
-    assert.match(r.text, /Himanshu\s+2 login/);
-    assert.match(r.text, /Zaid\s+1 login · 1 PF/);
-    assert.doesNotMatch(r.text, /contacted/, 'other stages are not the report');
-    assert.deepEqual(r.totals, { logged_in: 3, pf_paid: 1 });
-  });
-
-  test('someone with nothing is still listed', async () => {
-    // A name against a dash is the point of a team report. Hiding it would make
-    // the report only ever good news.
-    const crm = reportingCrm({ a1: {}, a2: {}, a3: {}, a4: {} });
-    const r = await buildStageReport(crm, AGENTS, { day: '2026-08-05' });
-
-    assert.match(r.text, /Ankit\s+—/);
-    assert.match(r.text, /Today: 0 login · 0 PF/);
-  });
-
-  test('an unreachable person is shown as such, not as zero', async () => {
-    // Reporting a failed lookup as "did nothing" would be a lie about someone's
-    // work.
-    const crm = reportingCrm({ a1: { logged_in: 1 } });
-    const r = await buildStageReport(crm, AGENTS, { day: '2026-08-05' });
-
-    assert.match(r.text, /Himanshu\s+\(no data\)/);
-  });
-});
-
 describe('loan MIS (month to date)', () => {
   const { buildLoanMis } = require('../src/pipeline/digest');
 
@@ -414,6 +357,48 @@ describe('loan MIS (month to date)', () => {
     assert.match(r.text, /PF: 3\/20/);
     assert.match(r.text, /🎯 Achievement: 15%/);
     assert.match(r.text, /📈 Login→PF: 30%/);
+  });
+
+  test('the counsellors are fetched concurrently, not one after another', async () => {
+    // This endpoint takes 40s+ per person. Sequentially that made the report a
+    // function of the sum of four slow calls — measured at 7m40s when one agent
+    // timed out and retried, so the message landed three minutes after the
+    // report it sits beside. Overlap is the whole fix; assert it directly.
+    let inFlight = 0;
+    let peak = 0;
+    const crm = {
+      users: new Map(),
+      async userDailyRange() {
+        inFlight += 1;
+        peak = Math.max(peak, inFlight);
+        await new Promise((r) => setTimeout(r, 15));
+        inFlight -= 1;
+        return [];
+      }
+    };
+
+    await buildLoanMis(crm, AGENTS, { today: '2026-08-01', pfTarget: 10 });
+
+    assert.equal(peak, AGENTS.length,
+      'every counsellor should be in flight at once');
+  });
+
+  test('one slow counsellor does not cost the others their figures', async () => {
+    // A failure is isolated to its own row, and the rest of the report still
+    // carries real numbers.
+    const crm = {
+      users: new Map(),
+      async userDailyRange(id) {
+        if (id === 'a2') throw new Error('The operation was aborted due to timeout');
+        return [day('2026-08-01', 4, { logged_in: 2, pf_paid: 1 })];
+      }
+    };
+
+    const r = await buildLoanMis(crm, AGENTS, { today: '2026-08-01', pfTarget: 10 });
+
+    assert.match(r.text, /Leads: 4 \| Login: 2 \| Sanction: 0 \| PF: 1/);
+    assert.match(r.text, /Zaid\n\(no data/);
+    assert.equal(r.totals.leads, 4);
   });
 
   test('the date is shown in full, since the report is filed and compared', async () => {
