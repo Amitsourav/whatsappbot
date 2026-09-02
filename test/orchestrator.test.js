@@ -1062,3 +1062,73 @@ describe('several leads in one message', () => {
     assert.equal(crm.calls.created[0].phone, '+919876543210');
   });
 });
+
+describe('a number the bot cannot read', () => {
+  test('an overseas lead is created, not dropped', async () => {
+    // 2 Sep 2026: this exact message was posted twice and silently skipped both
+    // times, because only Indian numbers were recognised.
+    const crm = fakeCrm();
+    const wa = fakeWhatsApp();
+    const group = makeGroup();
+    repo.employees.upsert({
+      waPhone: RAHUL_WA, crmProfileId: RAHUL_CRM, name: 'Zaid', email: 'z@x.com'
+    });
+
+    const o = new Orchestrator({ crm, whatsapp: wa });
+    await o.handle(incoming({
+      text: 'Ajaj Shaikh\n+96569950748\najazammyu@gmail.com\n\n@919812345678'
+    }), {});
+
+    assert.equal(crm.calls.created.length, 1, 'the lead should reach the CRM');
+    assert.equal(crm.calls.created[0].phone, '+96569950748');
+    assert.equal(crm.calls.created[0].full_name, 'Ajaj Shaikh');
+    assert.match(wa.sent[0].text, /Lead created/);
+  });
+
+  test('a number it still cannot read gets a reply, not silence', async () => {
+    const crm = fakeCrm();
+    const wa = fakeWhatsApp();
+    const group = makeGroup();
+    repo.employees.upsert({
+      waPhone: RAHUL_WA, crmProfileId: RAHUL_CRM, name: 'Zaid', email: 'z@x.com'
+    });
+
+    const o = new Orchestrator({ crm, whatsapp: wa });
+    const msg = incoming({ text: 'Ajaj Shaikh\n0096569950748\n@919812345678' });
+    await o.handle(msg, {});
+
+    assert.equal(crm.calls.created.length, 0, 'nothing should reach the CRM');
+    assert.equal(wa.sent.length, 1, 'the group must be told');
+    assert.match(wa.sent[0].text, /couldn't read that number/);
+    assert.match(wa.sent[0].text, /country code/);
+
+    // Recorded with its own reason, so the panel shows it rather than burying it
+    // among ordinary non-leads.
+    const rows = repo.skipped.recent(10);
+    assert.equal(rows[0].reason, 'unreadable_number');
+
+    // S2 — a redelivered message must not produce a second reply.
+    await o.handle(msg, {});
+    assert.equal(wa.sent.length, 1, 'redelivery must not reply twice');
+  });
+
+  test('ordinary tagged chatter is still answered with silence', async () => {
+    // The 40 other no_phone skips in live data look like this. Replying to them
+    // would make the bot an interruption in a group people work in.
+    const crm = fakeCrm();
+    const wa = fakeWhatsApp();
+    const group = makeGroup();
+
+    const o = new Orchestrator({ crm, whatsapp: wa });
+    for (const text of [
+      '@919812345678 apne apne cases update kro',
+      'updated in sheet @919812345678 sir',
+      'All leads status updates, except Himanshu.\n@919812345678 sir FYI'
+    ]) {
+      await o.handle(incoming({ text }), {});
+    }
+
+    assert.equal(wa.sent.length, 0, 'chatter must never draw a reply');
+    assert.equal(crm.calls.created.length, 0);
+  });
+});

@@ -14,13 +14,65 @@ describe('phone.normalise — mirrors the CRM (C14)', () => {
     }
   });
 
-  test('rejects what the CRM would store verbatim', () => {
-    // These would be stored raw by the CRM and never dedupe (C14), so we must not
-    // treat them as valid numbers.
-    for (const input of ['12345', '+14155552671', '98765 43210 call after 6',
-                         '1234567890', '', null]) {
+  test('rejects what is not a phone number at all', () => {
+    for (const input of ['12345', '98765 43210 call after 6', '1234567890',
+                         '', null]) {
       assert.equal(phone.normalise(input).normalised, false, `should reject ${input}`);
     }
+  });
+
+  test('accepts an overseas number written with its country code', () => {
+    // Changed 2 Sep 2026. These were rejected because the CRM stores a non-Indian
+    // number verbatim rather than normalising it (C14), so it deduplicates only
+    // against an identical string. That is a weaker guarantee, but the cost of
+    // the old rule was a real lead dropped in silence: a Kuwait number posted
+    // twice in the group, read as "not a lead" both times.
+    for (const [input, expected] of [
+      ['+96569950748', '+96569950748'],
+      ['+971 50 123 4567', '+971501234567'],
+      ['+1 415 555 2671', '+14155552671']
+    ]) {
+      const r = phone.normalise(input);
+      assert.equal(r.e164, expected, `failed on ${input}`);
+      assert.equal(r.international, true, `${input} should be flagged international`);
+    }
+  });
+
+  test('an overseas number needs the +, and a bare run is never guessed at', () => {
+    // The + is the whole safety catch. Without it an eleven-digit run could be an
+    // account number, an ID, or two numbers that ran together — and inventing a
+    // lead from one puts a record in the CRM nobody can act on.
+    assert.equal(phone.normalise('96569950748').normalised, false);
+    assert.equal(phone.normalise('00 965 6995 0748').normalised, false);
+  });
+
+  test('a +91 number still has to be a real mobile', () => {
+    // Must not fall through to the international branch: "+911234567890" claims
+    // to be Indian, and accepting it would create a lead under a number that
+    // cannot be called.
+    assert.equal(phone.normalise('+911234567890').normalised, false);
+    assert.equal(phone.normalise('+919876543210').e164, '+919876543210');
+    assert.equal(phone.normalise('+919876543210').international, false);
+  });
+
+  test('findUnreadable tells a failed lead from ordinary chat', () => {
+    // Fires on something number-shaped that could not be used...
+    assert.deepEqual(
+      phone.findUnreadable('Ajaj Shaikh\n0096569950748\najaz@gmail.com'),
+      ['0096569950748']
+    );
+    // ...and stays quiet on the tagged chatter that makes up most of what the
+    // bot skips. A mention renders in the body as a 15-digit LID, which would
+    // otherwise read as a mangled number and answer every tagged message.
+    for (const chatter of [
+      '@192703069470725 @71408830918849 apne apne cases update kro',
+      'updated in sheet @126851909435470 sir',
+      'All leads status updates, except Himanshu.\n@126851909435470 sir FYI'
+    ]) {
+      assert.deepEqual(phone.findUnreadable(chatter), [], `should ignore: ${chatter}`);
+    }
+    // A number it CAN read is not unreadable.
+    assert.deepEqual(phone.findUnreadable('lead +96569950748'), []);
   });
 
   test('rejects Indian numbers not starting 6-9', () => {

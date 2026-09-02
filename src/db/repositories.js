@@ -275,12 +275,18 @@ const leadUpdates = {
 
 /** Messages that produced nothing, kept with a reason. */
 const skipped = {
+  /**
+   * @returns {boolean} true if this message had not been recorded before.
+   *   WhatsApp redelivers after a reconnect, and a reply must not be sent twice
+   *   for the same message (S2).
+   */
   record({ waMessageId, groupId, body, reason, senderPhone }) {
-    get().prepare(`
+    const result = get().prepare(`
       INSERT OR IGNORE INTO skipped_messages
         (wa_message_id, group_id, body, reason, sender_phone)
       VALUES (?, ?, ?, ?, ?)
     `).run(waMessageId, groupId || null, body || '', reason, senderPhone || null);
+    return result.changes > 0;
   },
 
   recent(limit = 100) {

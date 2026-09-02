@@ -270,6 +270,41 @@ function safeName(name) {
 }
 
 /**
+ * Leads created this month, counted against the counsellor they are ASSIGNED to.
+ *
+ * Deliberately not the CRM's `leads_created` metric: that counts by creator, and
+ * since the bot creates every lead it captures, it credits the service account
+ * and shows zero against the person who owns the lead.
+ *
+ * @param {import('../crm/client').CrmClient} crm
+ * @param {string} monthStart - YYYY-MM-DD
+ * @param {string} today - YYYY-MM-DD
+ * @returns {Promise<Map<string, number>|null>} profile id → count, or null if the
+ *   lead list could not be read at all — which must not be reported as zero.
+ */
+async function countLeadsByAssignee(crm, monthStart, today) {
+  try {
+    const rows = await crm.listLeads({ date_from: monthStart }, 40);
+    const counts = new Map();
+
+    for (const lead of rows) {
+      // listLeads filters on the CRM's own notion of the date; the month is
+      // re-checked here in the display timezone so a lead created late on the
+      // 31st does not land in the wrong month's report.
+      const day = leadDate(lead);
+      if (!day || day < monthStart || day > today) continue;
+      if (!lead.assigned_agent_id) continue;
+      counts.set(lead.assigned_agent_id, (counts.get(lead.assigned_agent_id) || 0) + 1);
+    }
+
+    return counts;
+  } catch (error) {
+    logger.warn(`MIS lead count failed: ${error.message}`);
+    return null;
+  }
+}
+
+/**
  * The daily loan MIS: month-to-date performance per counsellor, against target.
  *
  * Month-to-date rather than same-day, because a PF target is monthly and a single
@@ -300,11 +335,22 @@ async function buildLoanMis(crm, agents, options = {}) {
   // single agent hit the timeout and retried, which put the message three
   // minutes behind the report it sits beside. In parallel it is the slowest one
   // alone, around 45s. Four concurrent requests is no load worth worrying about.
-  const settled = await Promise.all(agents.map((agent) =>
-    crm.userDailyRange(agent.id, daysElapsed).catch((error) => {
-      logger.warn(`MIS range failed for ${agent.name}: ${error.message}`);
-      return null;
-    })));
+  //
+  // Leads are counted separately, from the lead records themselves. The CRM's
+  // own `leads_created` metric counts by who CREATED the record, and the bot
+  // creates every lead it captures — so that metric credits "WhatsApp Ingest
+  // Service" and reports a flat zero against the counsellor who actually owns
+  // the lead. Measured on 29 Aug: 19 to the service account, 0 to all four.
+  // What the team means by "my leads" is the ones assigned to them, so that is
+  // what is counted. One shared fetch for everyone, not one per person.
+  const [settled, leadCounts] = await Promise.all([
+    Promise.all(agents.map((agent) =>
+      crm.userDailyRange(agent.id, daysElapsed).catch((error) => {
+        logger.warn(`MIS range failed for ${agent.name}: ${error.message}`);
+        return null;
+      }))),
+    countLeadsByAssignee(crm, monthStart, today)
+  ]);
 
   const rows = agents.map((agent, i) => {
     const days = settled[i];
@@ -312,7 +358,7 @@ async function buildLoanMis(crm, agents, options = {}) {
     if (!days) {
       // Unreachable is not the same as zero. A broken call reported as a zero day
       // is a lie that looks exactly like a bad month.
-      return { name: safeName(agent.name), reachable: false, leads: 0, counts: {} };
+      return { name: safeName(agent.name), reachable: false, leads: null, counts: {} };
     }
 
     // The endpoint's day window is undocumented, so the month boundary is
@@ -321,21 +367,29 @@ async function buildLoanMis(crm, agents, options = {}) {
     const mtd = days.filter((d) => d.date >= monthStart && d.date <= today);
 
     const counts = Object.fromEntries(MIS_STAGES.map(([key]) => [key, 0]));
-    let leads = 0;
 
     for (const day of mtd) {
-      leads += day.leads_created || 0;
       const moves = day.transitions_by_stage || {};
       for (const [key] of MIS_STAGES) counts[key] += moves[key] || 0;
     }
 
-    return { name: safeName(agent.name), reachable: true, leads, counts };
+    return {
+      name: safeName(agent.name),
+      reachable: true,
+      // null, not 0, when the lead fetch failed — see renderLeads.
+      leads: leadCounts ? (leadCounts.get(agent.id) || 0) : null,
+      counts
+    };
   });
 
   if (!rows.length) return null;
 
   const totals = {
-    leads: rows.reduce((sum, r) => sum + r.leads, 0),
+    // Only rows that actually carry a count. A failed lead fetch must not read
+    // as a team that captured nothing.
+    leads: rows.some((r) => r.leads !== null)
+      ? rows.reduce((sum, r) => sum + (r.leads ?? 0), 0)
+      : null,
     ...Object.fromEntries(MIS_STAGES.map(([key]) =>
       [key, rows.reduce((sum, r) => sum + (r.counts[key] || 0), 0)]))
   };
@@ -359,7 +413,7 @@ async function buildLoanMis(crm, agents, options = {}) {
     const pf = row.counts.pf_paid;
     const login = row.counts.logged_in;
 
-    lines.push(`Leads: ${row.leads} | Login: ${login} | `
+    lines.push(`Leads: ${row.leads ?? '—'} | Login: ${login} | `
       + `Sanction: ${row.counts.sanctioned} | PF: ${pf}`);
     lines.push(`🎯 PF Target: ${pfTarget} | Achievement: ${percent(pf, pfTarget)}`);
     lines.push(`📈 Login→PF: ${percent(pf, login)} | `
@@ -370,7 +424,7 @@ async function buildLoanMis(crm, agents, options = {}) {
   lines.push('━━━━━━━━━━━━━━━━━━');
   lines.push('👥 TEAM MTD');
   lines.push('');
-  lines.push(`Leads: ${totals.leads}`);
+  lines.push(`Leads: ${totals.leads ?? '—'}`);
   lines.push(`Login: ${totals.logged_in}`);
   lines.push(`Sanction: ${totals.sanctioned}`);
   lines.push(`PF: ${totals.pf_paid}/${teamTarget}`);

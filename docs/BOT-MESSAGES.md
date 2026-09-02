@@ -270,3 +270,48 @@ than trying to build a table out of spaces.
 `scheduler:stage-report:lastRun` is left behind in the settings table. It is inert
 — nothing reads it — and deleting rows from a live database to tidy up is not
 worth the risk.
+
+
+---
+
+## Amendment, 2026-09-02 — overseas numbers, and never failing in silence
+
+**A lead was posted twice and dropped both times.** `Ajaj Shaikh · +96569950748 ·
+@Zaid` — a Kuwait number. Phone extraction accepted Indian mobiles only, so the
+bot found no number, concluded the message was not a lead, and said nothing. The
+sender had no way to know except by noticing the missing confirmation.
+
+Two changes.
+
+**Overseas numbers are now accepted** when written with an explicit `+` and
+country code, at an E.164 length of 8–15 digits. The `+` is the safety catch: a
+bare eleven-digit run could be an account number or two numbers that ran
+together, and inventing a lead from one puts a record in the CRM nobody can act
+on. Someone who writes `+965…` has stated a country.
+
+This knowingly weakens one guarantee. The CRM normalises Indian numbers only and
+stores everything else verbatim (C14), so an overseas number deduplicates against
+an identical string but not against the same number written another way. That is
+a smaller cost than losing the lead outright.
+
+A number claiming to be Indian still has to be a real mobile — `+911234567890`
+is rejected rather than falling through to the overseas branch, which would
+create a lead under a number nobody can call.
+
+**Message 12 — a number that still cannot be read.**
+
+```
+⚠️ I couldn't read that number: 0096569950748
+Ajaj Shaikh
+For an overseas number include the country code, like +965 6995 0748
+```
+
+Sent only when the message carries something number-shaped that failed. Ordinary
+tagged chatter — "apne apne cases update kro", "updated in sheet @sir", which is
+40 of the 42 `no_phone` skips in live data — draws no reply, because a bot that
+answers every tagged message is an interruption. Mention placeholders are
+stripped first: WhatsApp renders a mention in the body as a fifteen-digit LID
+that would otherwise read as a mangled phone number.
+
+Recorded as `unreadable_number` so the panel shows it apart from ordinary
+non-leads, and sent once per message even if WhatsApp redelivers it (S2).

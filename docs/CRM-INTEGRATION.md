@@ -266,7 +266,8 @@ Pydantic. Truncate client-side: `loan_amount` 50, `bank_name` 100.
 **C13 — `assigned_agent_id` is not validated; a bad UUID 500s at the FK.** Always
 resolve against the cached user list before sending.
 
-**C14 — Phone normalisation covers Indian formats only.** `0091…`, `91…`, `0…` and
+**C14 — Phone normalisation covers Indian formats only.**
+*(Amended 2026-09-02: we now send overseas numbers anyway — see below.)* `0091…`, `91…`, `0…` and
 bare 10-digit all become `+91…`. Anything else is stored verbatim after a strip —
 so non-Indian numbers, extensions, and text like "98765 43210 call after 6" will
 not dedupe against their normalised form. Our extractor must therefore emit clean
@@ -289,3 +290,25 @@ creating `Foo@x.com` when `foo@x.com` exists returns 500. Same class of bug as t
 update one they just fixed. One line. **Recommend accepting** — we may write emails
 from WhatsApp messages, and a 500 is indistinguishable from a real outage to a
 retry loop.
+
+
+---
+
+## Amendment, 2026-09-02 — C14 revisited
+
+C14 said our extractor must emit clean Indian digits only, because the CRM stores
+anything else verbatim and it would never dedupe against its normalised form.
+That rule cost a real lead: a Kuwait number posted in the group twice, read as
+"not a lead" both times, dropped in silence.
+
+**We now send overseas numbers** when they carry an explicit `+` and country
+code. The dedup caveat in C14 is still true and is accepted deliberately: an
+overseas lead deduplicates against an identical string, but `+96569950748` and
+`0096569950748` are two records to the CRM. Since the bot always writes the same
+normalised `+<digits>` form, the exposure is to a human typing the number
+differently in the CRM UI — the same class of risk their missing update-path
+normalisation already creates for Indian numbers.
+
+Worth asking the CRM team to extend `normalize_phone` beyond India. Until then
+this is the better trade: a weaker dedup guarantee on overseas leads against
+losing them entirely.

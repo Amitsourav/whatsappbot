@@ -278,6 +278,22 @@ const replies = {
     return { text: lines.join('\n'), mentions: [] };
   },
 
+  /**
+   * 12 — a tagged message carried a number that could not be read.
+   *
+   * Sent rather than swallowed because the alternative is what happened on
+   * 2 Sep 2026: a lead was posted twice, dropped both times, and nobody knew
+   * until someone noticed the missing confirmation.
+   */
+  unreadableNumber({ name, raw }) {
+    return {
+      text: `⚠️ I couldn't read that number${raw ? `: ${raw}` : ''}\n`
+        + (name ? `${name}\n` : '')
+        + 'For an overseas number include the country code, like +965 6995 0748',
+      mentions: []
+    };
+  },
+
   /** 7 — the CRM could not be reached. Sent once per lead, never per retry (S6). */
   crmUnavailable({ name, phone }) {
     return {

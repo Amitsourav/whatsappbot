@@ -244,10 +244,13 @@ describe('loan MIS (month to date)', () => {
   const { buildLoanMis } = require('../src/pipeline/digest');
 
   /**
-   * A CRM double whose range report returns scripted per-day rows.
+   * A CRM double: scripted per-day stage rows, plus the lead list the Leads
+   * column is counted from.
+   *
    * @param {Object<string, object[]>} byAgent - profile id -> daily rows
+   * @param {object[]} [leadRows] - what listLeads returns
    */
-  function rangeCrm(byAgent) {
+  function rangeCrm(byAgent, leadRows = []) {
     return {
       users: new Map(),
       calls: [],
@@ -255,12 +258,18 @@ describe('loan MIS (month to date)', () => {
         this.calls.push({ userId, days });
         if (!(userId in byAgent)) throw new Error('no such user');
         return byAgent[userId];
-      }
+      },
+      async listLeads() { return leadRows; }
     };
   }
 
   const day = (date, leads, moves = {}) =>
     ({ date, leads_created: leads, transitions_by_stage: moves });
+
+  /** n leads created on `date`, assigned to `agentId`. Midday, so the IST date holds. */
+  const leadsFor = (agentId, date, n) => Array.from({ length: n }, () => ({
+    created_at: `${date}T06:00:00Z`, assigned_agent_id: agentId
+  }));
 
   const AGENTS = [{ id: 'a1', name: 'Ankit' }, { id: 'a2', name: 'Zaid' }];
 
@@ -271,7 +280,8 @@ describe('loan MIS (month to date)', () => {
         day('2026-08-02', 4, { logged_in: 1, pf_paid: 2 })
       ],
       a2: [day('2026-08-01', 1, { logged_in: 1 })]
-    });
+    }, [...leadsFor('a1', '2026-08-01', 3), ...leadsFor('a1', '2026-08-02', 4),
+        ...leadsFor('a2', '2026-08-01', 1)]);
     const r = await buildLoanMis(crm, AGENTS, { today: '2026-08-02', pfTarget: 10 });
 
     assert.match(r.text, /Leads: 7 \| Login: 3 \| Sanction: 1 \| PF: 2/);
@@ -293,10 +303,10 @@ describe('loan MIS (month to date)', () => {
     const crm = rangeCrm({
       a1: [day('2026-07-31', 99, { pf_paid: 99 }), day('2026-08-01', 2, { pf_paid: 1 })],
       a2: []
-    });
+    }, [...leadsFor('a1', '2026-07-31', 99), ...leadsFor('a1', '2026-08-01', 2)]);
     const r = await buildLoanMis(crm, AGENTS, { today: '2026-08-01', pfTarget: 10 });
 
-    assert.equal(r.totals.leads, 2);
+    assert.equal(r.totals.leads, 2, 'July leads are not this month');
     assert.equal(r.totals.pf_paid, 1);
   });
 
@@ -374,7 +384,8 @@ describe('loan MIS (month to date)', () => {
         await new Promise((r) => setTimeout(r, 15));
         inFlight -= 1;
         return [];
-      }
+      },
+      async listLeads() { return []; }
     };
 
     await buildLoanMis(crm, AGENTS, { today: '2026-08-01', pfTarget: 10 });
@@ -391,7 +402,8 @@ describe('loan MIS (month to date)', () => {
       async userDailyRange(id) {
         if (id === 'a2') throw new Error('The operation was aborted due to timeout');
         return [day('2026-08-01', 4, { logged_in: 2, pf_paid: 1 })];
-      }
+      },
+      async listLeads() { return leadsFor('a1', '2026-08-01', 4); }
     };
 
     const r = await buildLoanMis(crm, AGENTS, { today: '2026-08-01', pfTarget: 10 });
@@ -399,6 +411,54 @@ describe('loan MIS (month to date)', () => {
     assert.match(r.text, /Leads: 4 \| Login: 2 \| Sanction: 0 \| PF: 1/);
     assert.match(r.text, /Zaid\n\(no data/);
     assert.equal(r.totals.leads, 4);
+  });
+
+  test('leads are counted by who they are ASSIGNED to, not who created them', async () => {
+    // The CRM's own leads_created metric counts by creator, and the bot creates
+    // every lead it captures — so it credited "WhatsApp Ingest Service" and
+    // showed zero against the counsellor who owned the lead. Measured live on
+    // 29 Aug: 19 to the service account, 0 to all four. Over August that read
+    // 105 when the true figure for the four was 845.
+    const crm = rangeCrm(
+      // leads_created here is what the metric WOULD have said: nothing.
+      { a1: [day('2026-08-01', 0, { logged_in: 1 })], a2: [day('2026-08-01', 0, {})] },
+      [...leadsFor('a1', '2026-08-01', 12), ...leadsFor('a2', '2026-08-01', 5)]
+    );
+
+    const r = await buildLoanMis(crm, AGENTS, { today: '2026-08-01', pfTarget: 10 });
+
+    assert.match(r.text, /Ankit\nLeads: 12 /);
+    assert.match(r.text, /Zaid\nLeads: 5 /);
+    assert.equal(r.totals.leads, 17);
+  });
+
+  test('a lead with no assignee counts for nobody', async () => {
+    // Half the CRM's August leads had no counsellor. They are real, but they are
+    // not anyone's work, and quietly adding them to a row would overstate it.
+    const crm = rangeCrm({ a1: [day('2026-08-01', 0, {})], a2: [day('2026-08-01', 0, {})] },
+      [...leadsFor('a1', '2026-08-01', 2),
+       ...leadsFor(null, '2026-08-01', 9).map((l) => ({ ...l, assigned_agent_id: null }))]);
+
+    const r = await buildLoanMis(crm, AGENTS, { today: '2026-08-01', pfTarget: 10 });
+
+    assert.equal(r.totals.leads, 2);
+  });
+
+  test('an unreadable lead list shows a dash, never a zero', async () => {
+    // A failed fetch reported as "captured nothing" is the same class of lie as
+    // an unreachable counsellor reported as idle.
+    const crm = {
+      users: new Map(),
+      async userDailyRange() { return [day('2026-08-01', 0, { logged_in: 3 })]; },
+      async listLeads() { throw new Error('CRM unreachable'); }
+    };
+
+    const r = await buildLoanMis(crm, AGENTS, { today: '2026-08-01', pfTarget: 10 });
+
+    assert.match(r.text, /Leads: — \| Login: 3/);
+    assert.equal(r.totals.leads, null);
+    // The stage figures still came through, so the report is still worth sending.
+    assert.equal(r.totals.logged_in, 6);
   });
 
   test('the date is shown in full, since the report is filed and compared', async () => {

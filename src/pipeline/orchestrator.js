@@ -17,6 +17,7 @@
  *   dropped. Held leads wait for a human; unrecognised text becomes a remark.
  */
 const detect = require('./detect');
+const phoneUtil = require('./phone');
 const noise = require('./noise');
 const labelParser = require('./labels');
 const { replies } = require('./replies');
@@ -139,11 +140,28 @@ class Orchestrator {
     const result = detect.classify(message);
 
     if (!result.isLead) {
-      repo.skipped.record({
+      // Somebody tagged a colleague and wrote something number-shaped that could
+      // not be read. That is a lead attempt, not conversation, and staying quiet
+      // leaves them believing it worked — which is exactly how two leads were
+      // lost on 2 Sep 2026. Ordinary chat has no number in it and stays silent.
+      const unreadable = result.reason === 'no_phone'
+        ? phoneUtil.findUnreadable(message.text)
+        : [];
+
+      const fresh = repo.skipped.record({
         waMessageId: message.id, groupId: group.id,
-        body: message.text || '', reason: result.reason,
+        body: message.text || '',
+        reason: unreadable.length ? 'unreadable_number' : result.reason,
         senderPhone: message.senderPhone
       });
+
+      if (unreadable.length && fresh) {
+        logger.warn(`Unreadable number from ${message.senderPhone || 'someone'}: `
+          + `${unreadable.join(', ')}`);
+        await this.send(group, replies.unreadableNumber({
+          name: detect.extractName(message.text), raw: unreadable[0]
+        }), rawMessage);
+      }
       return;
     }
 
