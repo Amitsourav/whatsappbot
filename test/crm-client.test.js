@@ -120,7 +120,11 @@ describe('createLead', () => {
     await assert.rejects(() => client.createLead({ full_name: 'A' }), /returned no id/);
   });
 
-  test('rejects an unknown assigned_agent_id before sending (C13)', async () => {
+  test('rejects an unknown assigned_agent_id before creating anything (C13)', async () => {
+    // The guard exists so a bad UUID never reaches POST /leads, where it 500s at
+    // the foreign key. Since 3 Sep 2026 one GET /users is allowed first, to rule
+    // out a colleague added to the CRM since the cache was loaded at boot — but
+    // no lead may be created.
     const { client, calls } = mockClient(() => okLead());
     client.users = new Map([['known-uuid', { id: 'known-uuid' }]]);
 
@@ -128,7 +132,8 @@ describe('createLead', () => {
       () => client.createLead({ full_name: 'A', assigned_agent_id: 'ghost-uuid' }),
       /Unknown assigned_agent_id/
     );
-    assert.equal(calls.length, 0, 'must not reach the network');
+    assert.equal(calls.filter((c) => c.path === '/leads' && c.method === 'POST').length, 0,
+      'no lead may be created with an unresolved agent');
   });
 });
 
@@ -243,5 +248,66 @@ describe('remark bodies carry no bookkeeping', () => {
 
     assert.equal(calls[0].body.body.length, 5000);
     assert.equal(calls[0].body.wa_message_id, 'WAMSG123');
+  });
+});
+
+describe('a counsellor added since startup', () => {
+  const { CrmClient } = require('../src/crm/client');
+
+  test('the user list is refreshed before an agent is rejected', async () => {
+    // 3 Sep 2026: a new counsellor was mapped correctly, but the cache had been
+    // loaded at boot and did not contain her. Every lead tagged to her failed all
+    // eight attempts without a single request ever reaching the CRM.
+    const NEW_AGENT = 'b8ba7f67-77e4-4d3c-a2c5-05bdb9ab874c';
+    const paths = [];
+
+    const client = new CrmClient({
+      baseUrl: 'https://crm.test', apiKey: 'k',
+      fetchImpl: async (url) => {
+        paths.push(new URL(url).pathname);
+        if (url.endsWith('/users')) {
+          return { ok: true, status: 200,
+            async text() { return JSON.stringify([{ id: NEW_AGENT, full_name: 'Deepanshi' }]); } };
+        }
+        return { ok: true, status: 201,
+          async text() { return JSON.stringify({ id: 'lead-1' }); } };
+      }
+    });
+
+    // The stale cache from boot — she is not in it.
+    client.users = new Map([['someone-else', { id: 'someone-else' }]]);
+
+    const { lead } = await client.createLead({
+      full_name: 'Test', phone: '+917004428198', assigned_agent_id: NEW_AGENT
+    });
+
+    assert.equal(lead.id, 'lead-1', 'the lead should be created, not rejected');
+    assert.ok(paths.includes('/users'), 'the user list should have been refreshed');
+    assert.ok(client.isKnownUser(NEW_AGENT), 'the cache should now hold her');
+  });
+
+  test('a genuinely unknown agent is still refused after the refresh', async () => {
+    // C13 still holds: a bad UUID 500s at the foreign key, and that is
+    // indistinguishable from a real outage to a retry loop.
+    let userCalls = 0;
+    const client = new CrmClient({
+      baseUrl: 'https://crm.test', apiKey: 'k',
+      fetchImpl: async (url) => {
+        if (url.endsWith('/users')) {
+          userCalls += 1;
+          return { ok: true, status: 200, async text() { return '[]'; } };
+        }
+        throw new Error('createLead must not be attempted');
+      }
+    });
+    client.users = new Map();
+
+    await assert.rejects(
+      () => client.createLead({
+        full_name: 'Test', phone: '+919876543210', assigned_agent_id: 'not-a-real-uuid'
+      }),
+      /Unknown assigned_agent_id/
+    );
+    assert.equal(userCalls, 1, 'refreshed once, then gave up');
   });
 });

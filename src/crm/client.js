@@ -355,9 +355,19 @@ class CrmClient {
     if (!fields.full_name) throw new CrmError('full_name is required');
 
     if (fields.assigned_agent_id && this.users && !this.isKnownUser(fields.assigned_agent_id)) {
-      // C13 — an unknown UUID 500s at the foreign key, which is indistinguishable
-      // from a real outage to a retry loop.
-      throw new CrmError(`Unknown assigned_agent_id: ${fields.assigned_agent_id}`);
+      // The cache is loaded once at startup, so a colleague added to the CRM
+      // since then reads as invalid. Refresh before rejecting: on 3 Sep 2026 a
+      // new counsellor was mapped correctly and every lead tagged to her failed
+      // all eight attempts against a stale list, with nothing wrong but this.
+      logger.warn(`Unknown agent ${fields.assigned_agent_id} — refreshing the user list`);
+      await this.loadUsers().catch((error) =>
+        logger.warn(`User list refresh failed: ${error.message}`));
+
+      // C13 — a genuinely unknown UUID 500s at the foreign key, which is
+      // indistinguishable from a real outage to a retry loop. Still refused.
+      if (!this.isKnownUser(fields.assigned_agent_id)) {
+        throw new CrmError(`Unknown assigned_agent_id: ${fields.assigned_agent_id}`);
+      }
     }
 
     const { payload, dropped } = this.sanitise(fields, 'create');
