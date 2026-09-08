@@ -67,7 +67,19 @@ const config = {
     // The profile the API key resolves to. Used to recognise our own writes.
     serviceProfileId: process.env.CRM_SERVICE_PROFILE_ID,
     // Startup refuses to write if the key resolves to a different company.
-    expectedCompanyId: process.env.CRM_EXPECTED_COMPANY_ID
+    expectedCompanyId: process.env.CRM_EXPECTED_COMPANY_ID,
+
+    /**
+     * Where a lead the bot captures is recorded as having come from.
+     *
+     * The CRM made lead_source_id mandatory on 2026-09-07 and every create has
+     * failed since. It lives here rather than being hardcoded so the id can be
+     * repointed from Railway if the source list is ever rebuilt — a deploy to
+     * change one UUID is a deploy nobody will make in a hurry.
+     *
+     * Default is the CRM's own "WhatsApp" source.
+     */
+    leadSourceId: process.env.CRM_LEAD_SOURCE_ID || '01f49d3f-e1f9-4297-831b-aeabe6524744'
   },
 
   db: {

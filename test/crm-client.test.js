@@ -311,3 +311,40 @@ describe('a counsellor added since startup', () => {
     assert.equal(userCalls, 1, 'refreshed once, then gave up');
   });
 });
+
+describe('lead source (mandatory since 2026-09-07)', () => {
+  const { CrmClient } = require('../src/crm/client');
+  const { config } = require('../src/config');
+
+  /** Capture the create payload the client actually sends. */
+  function capturing() {
+    const bodies = [];
+    const client = new CrmClient({
+      baseUrl: 'https://crm.test', apiKey: 'k',
+      fetchImpl: async (url, opts) => {
+        bodies.push(JSON.parse(opts.body || '{}'));
+        return { ok: true, status: 201, async text() { return JSON.stringify({ id: 'lead-1' }); } };
+      }
+    });
+    return { client, bodies };
+  }
+
+  test('every create carries a lead source', async () => {
+    // The CRM began rejecting sourceless creates on 7 Sep 2026 and the bot could
+    // not file a single lead for a day: "A lead source is required."
+    const { client, bodies } = capturing();
+    await client.createLead({ full_name: 'A', phone: '+919876543210' });
+
+    assert.equal(bodies[0].lead_source_id, config.crm.leadSourceId);
+    assert.ok(bodies[0].lead_source_id, 'must never be empty');
+  });
+
+  test('an explicit source is not overwritten', async () => {
+    const { client, bodies } = capturing();
+    await client.createLead({
+      full_name: 'A', phone: '+919876543210', lead_source_id: 'a-different-source'
+    });
+
+    assert.equal(bodies[0].lead_source_id, 'a-different-source');
+  });
+});

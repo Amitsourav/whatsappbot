@@ -370,7 +370,14 @@ class CrmClient {
       }
     }
 
-    const { payload, dropped } = this.sanitise(fields, 'create');
+    // The CRM requires a source on every create (added 2026-09-07: "A lead source
+    // is required... without it the lead is invisible to every channel report").
+    // Set here rather than at the call sites so no path can forget it.
+    const withSource = fields.lead_source_id
+      ? fields
+      : { ...fields, lead_source_id: config.crm.leadSourceId };
+
+    const { payload, dropped } = this.sanitise(withSource, 'create');
 
     // Keep update-only values for the follow-up patch instead of losing them.
     const deferred = {};
