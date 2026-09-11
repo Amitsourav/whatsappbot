@@ -31,15 +31,33 @@ const MAX_ATTEMPTS = 8;
 const REQUEST_TIMEOUT_MS = 10_000;
 
 /**
- * Words that make a message look like a request rather than conversation.
+ * A message the sender explicitly marked as a task, by opening it with "Task".
  *
- * Deliberately loose. Tracker's AI is the real filter and it is strict — it
- * discards anything under 0.35 confidence and ignores messages aimed at other
- * people. This test exists only to keep pure banter out of the AI and off the
- * bill, so a false positive costs a fraction of a paisa and a false negative
- * costs a task.
+ *   Task
+ *   invoice update kar dena
+ *
+ * Also accepts "Task: …" and "Task - …" on one line.
+ *
+ * An explicit marker, not a guess. This replaced a keyword list that forwarded
+ * anything containing "update", "pending", "bhej dena" and so on — which caught
+ * two colleagues talking to each other about work that was never Amit's. The
+ * marker is the same discipline R9 applies to lead replies: a structured outcome
+ * follows from an explicit label, never from inference.
+ *
+ * The separator or line break after "Task" is what keeps it honest — without it
+ * "Tasks pending for everyone" would read as a task, and it is not one.
  */
-const TASKISH = /\b(bhej|bhejna|bhej dena|kar dena|karna hai|kar do|dekh lena|dekh lo|check kar|send|share|update|pending|follow ?up|kya hua|reminder|complete|submit|draft|prepare|arrange|confirm|kal tak|aaj tak|parso|eod|asap|urgent)\b/i;
+const TASK_MARKER = /^\s*tasks?\b[ \t]*(?:[:\-–—][ \t]*|\r?\n)([\s\S]+)$/i;
+
+/**
+ * Whether a message was explicitly marked as a task.
+ * @param {string} text
+ * @returns {boolean}
+ */
+function taskMarked(text) {
+  const match = String(text || '').match(TASK_MARKER);
+  return Boolean(match && match[1].trim());
+}
 
 /**
  * Compare two phone numbers, ignoring "+", spaces and a missing country code.
@@ -109,7 +127,9 @@ class TrackerClient {
       .some((p) => same(p, this.settings.ownerPhone));
     const isReplyToMe = same(message.quotedAuthorPhone, this.settings.ownerPhone);
 
-    if (!mentionedMe && !isReplyToMe && !TASKISH.test(text)) return false;
+    // Three ways a message becomes Amit's: he was tagged, it answers something he
+    // said, or the sender wrote "Task" at the top to say so outright.
+    if (!mentionedMe && !isReplyToMe && !taskMarked(text)) return false;
 
     const row = repo.trackerOutbox.enqueue({
       waMessageId: message.id,
@@ -277,4 +297,4 @@ class TrackerClient {
   }
 }
 
-module.exports = { TrackerClient, same, TASKISH };
+module.exports = { TrackerClient, same, taskMarked, TASK_MARKER };

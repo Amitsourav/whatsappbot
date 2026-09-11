@@ -8,7 +8,7 @@ process.env.DB_PATH = TEST_DB;
 
 const db = require('../src/db');
 const repo = require('../src/db/repositories');
-const { TrackerClient, same } = require('../src/tracker/client');
+const { TrackerClient, same, taskMarked } = require('../src/tracker/client');
 const { Orchestrator } = require('../src/pipeline/orchestrator');
 
 const OWNER = '+917004428198';
@@ -74,9 +74,47 @@ describe('maybeQueue — what gets forwarded', () => {
       msg({ text: 'and the invoice too', quotedAuthorPhone: OWNER }), g));
   });
 
-  test('a task-shaped message is queued even with no tag', () => {
+  test('a message marked "Task" is queued even with no tag', () => {
+    // The agreed format: the sender says outright that it is a task.
+    //   Task
+    //   invoice update kar dena
     const g = makeGroup();
-    assert.ok(tracker().maybeQueue(msg({ text: 'report bhej dena by eod' }), g));
+    assert.ok(tracker().maybeQueue(msg({ text: 'Task\ninvoice update kar dena' }), g));
+  });
+
+  test('the marker is accepted on one line too', () => {
+    const g = makeGroup();
+    const t = tracker();
+    for (const text of ['Task: invoice update kar dena', 'task - server restart kar do',
+                        'TASK\nreport bhej dena']) {
+      assert.ok(t.maybeQueue(msg({ text }), g), `should queue: ${text}`);
+    }
+  });
+
+  test('work talk without the marker is NOT queued', () => {
+    // This is the change of 11 Sep 2026. A keyword list forwarded anything with
+    // "update", "pending" or "bhej dena" in it, which meant two colleagues
+    // talking to each other were sent to Amit's task app. Only an explicit
+    // marker counts now.
+    const g = makeGroup();
+    const t = tracker();
+    for (const text of ['invoice update kar dena', 'report bhej dena by eod',
+                        'ye kal tak pending hai', 'urgent: server down',
+                        'ye task kal complete karna hai']) {
+      assert.equal(t.maybeQueue(msg({ text }), g), false, `should skip: ${text}`);
+    }
+    assert.equal(repo.trackerOutbox.pending(10).length, 0);
+  });
+
+  test('"Tasks pending for everyone" is not a task', () => {
+    // The separator or line break after the word is what keeps the marker honest.
+    const g = makeGroup();
+    assert.equal(tracker().maybeQueue(msg({ text: 'Tasks pending for everyone' }), g), false);
+  });
+
+  test('the marker alone, with nothing after it, is not a task', () => {
+    const g = makeGroup();
+    assert.equal(tracker().maybeQueue(msg({ text: 'Task' }), g), false);
   });
 
   test('ordinary chat is not queued', () => {
@@ -96,7 +134,7 @@ describe('maybeQueue — what gets forwarded', () => {
     // What Amit writes is a promise he made, not a task he was given.
     const g = makeGroup();
     assert.equal(tracker().maybeQueue(
-      msg({ senderPhone: OWNER, text: 'I will send it kal tak', mentions: [OWNER] }), g),
+      msg({ senderPhone: OWNER, text: 'Task\nI will send it kal tak', mentions: [OWNER] }), g),
       false);
   });
 
@@ -111,26 +149,26 @@ describe('maybeQueue — what gets forwarded', () => {
 
   test('nothing is queued when the group switch is off', () => {
     const g = makeGroup({ tracker: 0 });
-    assert.equal(tracker().maybeQueue(msg({ text: 'bhej dena', mentions: [OWNER] }), g), false);
+    assert.equal(tracker().maybeQueue(msg({ text: 'Task\nsomething', mentions: [OWNER] }), g), false);
   });
 
   test('nothing is queued when Tracker is not configured', () => {
     const g = makeGroup();
     const t = new TrackerClient({ settings: { ...SETTINGS, url: '', token: '' } });
-    assert.equal(t.maybeQueue(msg({ text: 'bhej dena', mentions: [OWNER] }), g), false);
+    assert.equal(t.maybeQueue(msg({ text: 'Task\nsomething', mentions: [OWNER] }), g), false);
   });
 
   test('our own outgoing messages are not queued', () => {
     const g = makeGroup();
     assert.equal(tracker().maybeQueue(
-      msg({ fromMe: true, text: 'bhej dena', mentions: [OWNER] }), g), false);
+      msg({ fromMe: true, text: 'Task\nsomething', mentions: [OWNER] }), g), false);
   });
 
   test('the same message twice queues one row', () => {
     // WhatsApp redelivers after a reconnect; wa_message_id is UNIQUE.
     const g = makeGroup();
     const t = tracker();
-    const m = msg({ text: 'bhej dena', mentions: [OWNER] });
+    const m = msg({ text: 'Task\nsomething', mentions: [OWNER] });
     assert.ok(t.maybeQueue(m, g));
     assert.equal(t.maybeQueue(m, g), false);
     assert.equal(repo.trackerOutbox.pending(10).length, 1);
@@ -139,7 +177,7 @@ describe('maybeQueue — what gets forwarded', () => {
   test('the payload carries the flags Tracker extracts from', () => {
     const g = makeGroup();
     tracker().maybeQueue(msg({
-      text: 'draft bhej dena', mentions: [OWNER], senderName: 'Priya',
+      text: 'Task\ndraft bhejna hai', mentions: [OWNER], senderName: 'Priya',
       quotedText: 'earlier message', timestamp: 1789077000
     }), g);
 
@@ -158,7 +196,7 @@ describe('flush — sending', () => {
   const queue = (t, n = 1) => {
     const g = makeGroup();
     for (let i = 0; i < n; i += 1) {
-      t.maybeQueue(msg({ text: `task ${i} bhej dena`, mentions: [OWNER] }), g);
+      t.maybeQueue(msg({ text: `Task\nnumber ${i}`, mentions: [OWNER] }), g);
     }
   };
 
@@ -245,13 +283,13 @@ describe('flush — sending', () => {
     });
 
     const a = makeGroup();
-    t.maybeQueue(msg({ text: 'one bhej dena', mentions: [OWNER] }), a);
+    t.maybeQueue(msg({ text: 'Task\none', mentions: [OWNER] }), a);
 
     const other = repo.groups.upsert('120363888@g.us', 'Second Group');
     repo.groups.setTrackerEnabled(other.id, 1);
     t.maybeQueue(msg({
       groupId: '120363888@g.us', groupName: 'Second Group',
-      text: 'two bhej dena', mentions: [OWNER]
+      text: 'Task\ntwo', mentions: [OWNER]
     }), repo.groups.byWaId('120363888@g.us'));
 
     await t.flush();
@@ -311,7 +349,7 @@ describe('lead capture is never affected', () => {
 
     const o = new Orchestrator({ crm, whatsapp: wa, tracker: t });
     await o.handle(msg({
-      text: 'Priya Sharma\n9876543210 bhej dena',
+      text: 'Task\nPriya Sharma 9876543210',
       mentions: [OWNER]
     }), {});
 
