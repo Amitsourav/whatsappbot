@@ -269,8 +269,11 @@ const views = {
       <p class="hint">Switch on the groups to watch. <b>In-house</b> groups create
         CRM leads. <b>Bank</b> groups record which lender a lead was sent to —
         the bot never posts in those.</p>
+      <p class="muted"><b>Tasks &rarr; Tracker</b> forwards this group's messages to
+        your task app for review. It is independent of everything else here, works
+        whether or not the group is watched for leads, and never posts anything.</p>
       <div class="scroll"><table>
-        <tr><th>Group</th><th>Watch</th><th>Type</th><th>Bank</th><th>Replies</th></tr>
+        <tr><th>Group</th><th>Watch</th><th>Type</th><th>Bank</th><th>Replies</th><th>Tasks&nbsp;&rarr;&nbsp;Tracker</th></tr>
         ${groups.map((g) => `<tr>
           <td>${esc(g.name)}</td>
           <td><label class="switch"><input type="checkbox" ${g.is_active ? 'checked' : ''}
@@ -291,6 +294,8 @@ const views = {
             ? '<span class="pill">never</span>'
             : `<label class="switch"><input type="checkbox" ${g.send_enabled ? 'checked' : ''}
                  onchange="saveGroup(${g.id},{send_enabled:this.checked})"></label>`}</td>
+          <td><label class="switch"><input type="checkbox" ${g.tracker_enabled ? 'checked' : ''}
+              onchange="saveGroup(${g.id},{tracker_enabled:this.checked})"></label></td>
         </tr>`).join('')}
       </table></div>
     </div>`;

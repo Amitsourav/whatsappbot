@@ -16,6 +16,7 @@ const { Orchestrator } = require('./pipeline/orchestrator');
 const { RetryWorker } = require('./pipeline/worker');
 const { DailyScheduler } = require('./pipeline/scheduler');
 const { buildMorningMessage, buildLoanMis } = require('./pipeline/digest');
+const { TrackerClient } = require('./tracker/client');
 const { createServer } = require('./api/server');
 
 async function main() {
@@ -42,7 +43,8 @@ async function main() {
 
   const crm = new CrmClient();
   const whatsapp = new WhatsAppClient();
-  const orchestrator = new Orchestrator({ crm, whatsapp });
+  const tracker = new TrackerClient();
+  const orchestrator = new Orchestrator({ crm, whatsapp, tracker });
   const worker = new RetryWorker({ orchestrator });
 
   /**
@@ -161,6 +163,18 @@ async function main() {
 
   worker.start();
 
+  // Task capture. Started only when it is configured, so a deploy with no
+  // Tracker variables behaves exactly as before.
+  if (tracker.configured) {
+    tracker.start();
+    const feeding = repo.groups.all().filter((g) => g.tracker_enabled);
+    logger.info(feeding.length
+      ? `Tracker: forwarding from ${feeding.map((g) => g.name).join(', ')}`
+      : 'Tracker: configured, but no group is switched on yet');
+  } else {
+    logger.info('Tracker: not configured — WhatsApp task capture is off');
+  }
+
   // Yesterday's summary, posted into each monitored group that has replies on.
   // Nothing is posted on a day with no leads — a summary reading "0" every
   // morning trains people to ignore the bot.
@@ -241,6 +255,7 @@ async function main() {
     logger.info(`${signal} — shutting down`);
 
     worker.stop();
+    tracker.stop();
     digest.stop();
     loanMis.stop();
     await whatsapp.disconnect().catch(() => {});

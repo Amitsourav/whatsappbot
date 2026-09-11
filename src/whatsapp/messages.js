@@ -99,6 +99,12 @@ function normalise(raw) {
     // unlike v1's comparison of quoted message text.
     quotedId: context?.stanzaId || null,
     quotedText: textOf(context?.quotedMessage) || null,
+    // Who wrote the message being replied to. Needed to tell "someone replied to
+    // Amit" from any other reply. May be a LID, which the client resolves.
+    quotedAuthorJid: context?.participant || null,
+    // WhatsApp's display name for the sender, for the Tracker payload. Absent on
+    // some message types, which is why it is optional there.
+    senderName: raw.pushName || null,
     timestamp: Number(raw.messageTimestamp) || Math.floor(Date.now() / 1000)
   };
 }

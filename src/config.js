@@ -128,6 +128,22 @@ const config = {
     pfTarget: int(process.env.PF_TARGET, 10)
   },
 
+  /**
+   * Tracker — Amit's personal task app, a SECOND destination alongside the CRM.
+   *
+   * Everything here is optional. With no URL or token the capture is off and the
+   * bot behaves exactly as it did before, which is what makes this safe to deploy
+   * ahead of being switched on.
+   */
+  tracker: {
+    url: process.env.TRACKER_URL || '',
+    token: process.env.TRACKER_TOKEN || '',
+    // Amit's WhatsApp number. Used to tell "tagged me" from "tagged someone else".
+    ownerPhone: process.env.TRACKER_OWNER_PHONE || '+917004428198',
+    flushMs: int(process.env.TRACKER_FLUSH_MS, 60_000),
+    batchSize: int(process.env.TRACKER_BATCH_SIZE, 20)
+  },
+
   /** Duplicate suppression window, in minutes. */
   dedupeWindowMinutes: int(process.env.DEDUPE_WINDOW_MINUTES, 10)
 };
@@ -161,6 +177,12 @@ function validate() {
 
   if (!config.crm.baseUrl || !config.crm.apiKey) {
     warnings.push('CRM_BASE_URL / CRM_API_KEY are not set — leads will be captured but not sent.');
+  }
+
+  // A warning, never fatal: task capture is an extra, and the bot's real job is
+  // leads. Refusing to boot over it would turn a nice-to-have into an outage.
+  if (!config.tracker.url || !config.tracker.token) {
+    warnings.push('TRACKER_URL / TRACKER_TOKEN not set — WhatsApp task capture is off.');
   }
 
   return { fatal, warnings };

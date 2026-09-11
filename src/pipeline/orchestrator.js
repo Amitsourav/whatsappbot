@@ -37,10 +37,12 @@ class Orchestrator {
   /**
    * @param {{ crm: import('../crm/client').CrmClient, whatsapp: object }} deps
    */
-  constructor({ crm, whatsapp }) {
+  constructor({ crm, whatsapp, tracker = null }) {
     this.crm = crm;
     this.whatsapp = whatsapp;
     this.bank = new BankHandler({ crm, whatsapp });
+    // Optional. Absent means task capture is off and nothing here changes.
+    this.tracker = tracker;
   }
 
   /**
@@ -52,8 +54,6 @@ class Orchestrator {
     try {
       const group = repo.groups.upsert(message.groupId, message.groupName || message.groupId);
 
-      if (!group.is_active) return;
-
       // The point to ask the phone to replay from after a gap. Recorded for every
       // message we see, whether or not it turns out to be a lead.
       repo.groups.setWatermark(message.groupId, {
@@ -61,6 +61,20 @@ class Orchestrator {
         timestamp: message.timestamp,
         fromMe: message.fromMe
       });
+
+      // Tracker is a second destination and answers to its own switch, so this
+      // sits OUTSIDE the is_active check — a group can feed the task app without
+      // being a lead group at all. Synchronous, and wrapped: a fault here is
+      // logged and swallowed, because nothing about task capture may cost a lead.
+      if (this.tracker) {
+        try {
+          this.tracker.maybeQueue(message, group);
+        } catch (error) {
+          logger.warn(`Tracker queue failed for ${message?.id}: ${error.message}`);
+        }
+      }
+
+      if (!group.is_active) return;
 
       if (group.purpose === 'bank') {
         // A different set of rules entirely — see pipeline/bank.js. The bot never

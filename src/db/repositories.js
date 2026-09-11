@@ -66,6 +66,18 @@ const groups = {
       .run(bankName || null, id);
   },
 
+  /**
+   * Whether this group's messages are forwarded to Tracker.
+   *
+   * Deliberately independent of is_active and send_enabled: a group can feed
+   * Tracker without being a lead group, and turning it on never causes the bot
+   * to post anything.
+   */
+  setTrackerEnabled(id, enabled) {
+    get().prepare("UPDATE groups SET tracker_enabled = ?, updated_at = datetime('now') WHERE id = ?")
+      .run(enabled ? 1 : 0, id);
+  },
+
   setPurpose(id, purpose) {
     get().prepare(`
       UPDATE groups
@@ -439,6 +451,79 @@ const bankMessages = {
   }
 };
 
+/**
+ * Messages owed to Tracker (Amit's task app).
+ *
+ * Written before any network call, so an outage or a restart is a delay rather
+ * than a loss. Nothing here touches leads.
+ */
+const trackerOutbox = {
+  /**
+   * Queue a message. Returns null if it was already queued — WhatsApp redelivers
+   * after a reconnect, and wa_message_id is UNIQUE, so that is a no-op.
+   */
+  enqueue({ waMessageId, groupId, waGroupId, groupName, payload }) {
+    const result = get().prepare(`
+      INSERT INTO tracker_outbox
+        (wa_message_id, group_id, wa_group_id, group_name, payload)
+      VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(wa_message_id) DO NOTHING
+    `).run(waMessageId, groupId || null, waGroupId, groupName || null,
+           JSON.stringify(payload));
+
+    return result.changes === 0 ? null : this.byId(result.lastInsertRowid);
+  },
+
+  byId(id) {
+    return get().prepare('SELECT * FROM tracker_outbox WHERE id = ?').get(id) || null;
+  },
+
+  /**
+   * Oldest pending rows. Ordered by group first so a caller can send one POST
+   * per conversation — Tracker extracts per conversation, and mixing groups in
+   * one request would confuse it.
+   */
+  pending(limit = 20) {
+    return get().prepare(`
+      SELECT * FROM tracker_outbox
+      WHERE status = 'pending' AND attempts < 8
+      ORDER BY wa_group_id, created_at ASC LIMIT ?
+    `).all(limit);
+  },
+
+  markSent(ids) {
+    if (!ids?.length) return;
+    const stmt = get().prepare(`
+      UPDATE tracker_outbox SET status = 'sent', last_error = NULL,
+                                sent_at = datetime('now')
+      WHERE id = ?
+    `);
+    get().transaction((rows) => { for (const id of rows) stmt.run(id); })(ids);
+  },
+
+  markFailed(id, error) {
+    get().prepare("UPDATE tracker_outbox SET status = 'failed', last_error = ? WHERE id = ?")
+      .run(String(error).slice(0, 1000), id);
+  },
+
+  recordAttempt(ids, error) {
+    const list = Array.isArray(ids) ? ids : [ids];
+    const stmt = get().prepare(`
+      UPDATE tracker_outbox SET attempts = attempts + 1, last_error = ? WHERE id = ?
+    `);
+    const message = error ? String(error).slice(0, 1000) : null;
+    get().transaction((rows) => { for (const id of rows) stmt.run(message, id); })(list);
+  },
+
+  /** Counts by status, for the panel. */
+  counts() {
+    const rows = get().prepare(
+      'SELECT status, COUNT(*) AS count FROM tracker_outbox GROUP BY status'
+    ).all();
+    return Object.fromEntries(rows.map((r) => [r.status, r.count]));
+  }
+};
+
 const settings = {
   get(key, fallback = null) {
     const row = get().prepare('SELECT value FROM settings WHERE key = ?').get(key);
@@ -477,5 +562,5 @@ const logs = {
 
 module.exports = {
   groups, employees, leads, leadUpdates, bankShares, bankMessages,
-  skipped, settings, logs
+  skipped, settings, logs, trackerOutbox
 };

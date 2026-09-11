@@ -437,6 +437,22 @@ class WhatsAppClient extends EventEmitter {
       if (sender) message.senderPhone = sender;
     }
 
+    // Who wrote the quoted message, for Tracker's "is this a reply to me" flag.
+    // Best effort by design: a failure here must not delay or drop the message,
+    // and the other two task signals still work without it.
+    if (message.quotedAuthorJid) {
+      try {
+        message.quotedAuthorPhone = phoneFromJid(message.quotedAuthorJid);
+        if (!message.quotedAuthorPhone && String(message.quotedAuthorJid).endsWith('@lid')) {
+          const [author] = await this.resolveLids(message.groupId, [message.quotedAuthorJid]);
+          message.quotedAuthorPhone = author || null;
+        }
+      } catch (error) {
+        message.quotedAuthorPhone = null;
+        logger.warn(`Could not resolve quoted author: ${error.message}`);
+      }
+    }
+
     // raw is passed through so a reply can quote the message that triggered it.
     this.emit('message', message, raw);
   }

@@ -256,6 +256,40 @@ const MIGRATIONS = [
       CREATE INDEX idx_bank_messages_lead   ON bank_messages(crm_lead_id, bank_name);
     `
   }
+  ,{
+    name: '004_tracker_outbox',
+    sql: `
+      -- Groups whose messages are forwarded to Tracker (Amit's task app).
+      --
+      -- Deliberately separate from is_active: a group can feed Tracker without
+      -- being a lead group, and a lead group need not feed Tracker. Default 0,
+      -- so applying this migration changes nothing until somebody opts a group in.
+      ALTER TABLE groups ADD COLUMN tracker_enabled INTEGER NOT NULL DEFAULT 0;
+
+      -- Queue of messages owed to Tracker. Written before any network call, so a
+      -- restart or an outage is a delay rather than a loss — the same rule the
+      -- lead pipeline follows.
+      CREATE TABLE tracker_outbox (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        wa_message_id TEXT    NOT NULL UNIQUE,
+        group_id      INTEGER REFERENCES groups(id) ON DELETE CASCADE,
+        wa_group_id   TEXT    NOT NULL,
+        group_name    TEXT,
+        payload       TEXT    NOT NULL,   -- the message object, JSON
+        status        TEXT    NOT NULL DEFAULT 'pending'
+                      CHECK (status IN ('pending','sent','failed')),
+        attempts      INTEGER NOT NULL DEFAULT 0,
+        last_error    TEXT,
+        created_at    TEXT    NOT NULL DEFAULT (datetime('now')),
+        sent_at       TEXT
+      );
+
+      -- wa_message_id is UNIQUE, so a WhatsApp redelivery is a no-op here exactly
+      -- as it is for leads.
+      CREATE INDEX idx_tracker_outbox_pending
+        ON tracker_outbox(status, wa_group_id) WHERE status = 'pending';
+    `
+  }
 ];
 
 module.exports = { MIGRATIONS };

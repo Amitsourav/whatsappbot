@@ -79,6 +79,11 @@ function createServer({ whatsapp, crm, orchestrator, jobs = {} }) {
       counts: {
         held: repo.leads.held().length,
         pending: repo.leads.pending(999).length
+      },
+      tracker: {
+        configured: Boolean(config.tracker.url && config.tracker.token),
+        groups: repo.groups.all().filter((g) => g.tracker_enabled).length,
+        outbox: repo.trackerOutbox.counts()
       }
     });
   });
@@ -127,6 +132,11 @@ function createServer({ whatsapp, crm, orchestrator, jobs = {} }) {
     if (purpose !== undefined) repo.groups.setPurpose(id, purpose);
     if (req.body?.bank_name !== undefined) repo.groups.setBank(id, req.body.bank_name);
     if (isActive !== undefined) repo.groups.setActive(id, isActive);
+    // Independent of the other two: forwarding to Tracker never posts anything,
+    // and a group can feed the task app without being a lead group.
+    if (req.body?.tracker_enabled !== undefined) {
+      repo.groups.setTrackerEnabled(id, req.body.tracker_enabled);
+    }
     // Set last: a bank purpose forces sending off, and that must win.
     if (sendEnabled !== undefined) repo.groups.setSendEnabled(id, sendEnabled);
 
