@@ -62,6 +62,15 @@ const REQUEST_TIMEOUT_MS = config.tracker.timeoutMs || 30_000;
 const TASK_MARKER = /^\s*tasks?\b[ \t]*(?:[:\-–—][ \t]*|\r?\n)([\s\S]+)$/i;
 
 /**
+ * How many words one of Amit's own messages needs before it counts as a promise.
+ *
+ * "kal tak bhej dunga" is a commitment; "haan", "theek", "dekhta hoon" are not,
+ * and the noise filter does not catch every short fragment. Four keeps the real
+ * ones — "invoice bhej diya subah hi" is five — and drops the stubs.
+ */
+const MIN_OWNER_WORDS = 4;
+
+/**
  * Whether a message was explicitly marked as a task.
  * @param {string} text
  * @returns {boolean}
@@ -125,23 +134,35 @@ class TrackerClient {
     const text = String(message.text || '').trim();
     if (!text) return false;
 
-    // Amit's own messages are promises he made, not tasks he was given.
-    if (same(message.senderPhone, this.settings.ownerPhone)) return false;
-
     // "my leads", "help" — instructions to the bot, never tasks.
     if (commands.parse(text)) return false;
 
     // "ok", "done", "thik hai", emoji. Whole-message match only, so "documents
-    // done" still counts as information.
+    // done" still counts as information. Applies to Amit's messages as well —
+    // an acknowledgement is not a promise.
     if (noise.classify(text).isNoise) return false;
 
-    const mentionedMe = (message.mentions || [])
-      .some((p) => same(p, this.settings.ownerPhone));
-    const isReplyToMe = same(message.quotedAuthorPhone, this.settings.ownerPhone);
+    // A message Amit wrote himself is a promise he made, not a task he was
+    // given. Until 11 Sep these were skipped outright; Tracker's Phase 4 now
+    // reads them, so the rule is inverted.
+    const fromOwner = same(message.senderPhone, this.settings.ownerPhone);
 
-    // Three ways a message becomes Amit's: he was tagged, it answers something he
-    // said, or the sender wrote "Task" at the top to say so outright.
-    if (!mentionedMe && !isReplyToMe && !taskMarked(text)) return false;
+    const mentionedMe = !fromOwner && (message.mentions || [])
+      .some((p) => same(p, this.settings.ownerPhone));
+    const isReplyToMe = !fromOwner
+      && same(message.quotedAuthorPhone, this.settings.ownerPhone);
+
+    if (fromOwner) {
+      // A promise is never tagged and never carries the Task marker, so neither
+      // is required. Length is the only guard: Tracker's AI is the real filter
+      // and runs a higher confidence floor here than for tasks, because
+      // inventing a promise is worse than missing one.
+      if (text.split(/\s+/).filter(Boolean).length < MIN_OWNER_WORDS) return false;
+    } else if (!mentionedMe && !isReplyToMe && !taskMarked(text)) {
+      // Three ways a message becomes Amit's: he was tagged, it answers something
+      // he said, or the sender wrote "Task" at the top to say so outright.
+      return false;
+    }
 
     const row = repo.trackerOutbox.enqueue({
       waMessageId: message.id,
@@ -157,6 +178,8 @@ class TrackerClient {
         timestamp: message.timestamp,
         mentionedMe,
         isReplyToMe,
+        // Meaningless on his own messages, so both are forced false above.
+        fromOwner,
         quotedText: message.quotedText || null
       }
     });
@@ -313,4 +336,4 @@ class TrackerClient {
   }
 }
 
-module.exports = { TrackerClient, same, taskMarked, TASK_MARKER };
+module.exports = { TrackerClient, same, taskMarked, TASK_MARKER, MIN_OWNER_WORDS };

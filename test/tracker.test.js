@@ -130,12 +130,58 @@ describe('maybeQueue — what gets forwarded', () => {
       false);
   });
 
-  test("the owner's own messages are not queued", () => {
-    // What Amit writes is a promise he made, not a task he was given.
+  test("the owner's own messages ARE queued, as promises", () => {
+    // Inverted 11 Sep 2026 by the §12 addendum. What Amit writes is a promise he
+    // made; Tracker's Phase 4 reads those, so they are no longer skipped.
     const g = makeGroup();
-    assert.equal(tracker().maybeQueue(
-      msg({ senderPhone: OWNER, text: 'Task\nI will send it kal tak', mentions: [OWNER] }), g),
-      false);
+    assert.ok(tracker().maybeQueue(msg({
+      senderPhone: OWNER, senderName: 'Amit',
+      text: 'haan main kal tak revised pricing sheet bhej dunga'
+    }), g));
+
+    const payload = JSON.parse(repo.trackerOutbox.pending(1)[0].payload);
+    assert.equal(payload.fromOwner, true);
+    // Meaningless on his own message, so both are false whatever the mentions say.
+    assert.equal(payload.mentionedMe, false);
+    assert.equal(payload.isReplyToMe, false);
+  });
+
+  test("a promise needs no tag and no Task marker", () => {
+    // A promise is never tagged and never marked — requiring either would catch
+    // none of them.
+    const g = makeGroup();
+    assert.ok(tracker().maybeQueue(msg({
+      senderPhone: OWNER, text: 'invoice bhej diya subah hi', mentions: []
+    }), g));
+  });
+
+  test("fromOwner is false for everyone else", () => {
+    const g = makeGroup();
+    tracker().maybeQueue(msg({ text: 'Task\ncheck the logs' }), g);
+    const payload = JSON.parse(repo.trackerOutbox.pending(1)[0].payload);
+    assert.equal(payload.fromOwner, false);
+  });
+
+  test("the owner's acknowledgements are still skipped", () => {
+    // An acknowledgement is not a promise, whoever wrote it.
+    const g = makeGroup();
+    const t = tracker();
+    for (const text of ['ok', 'done', 'thik hai', 'noted', '👍']) {
+      assert.equal(t.maybeQueue(msg({ senderPhone: OWNER, text }), g), false,
+        `should skip: ${text}`);
+    }
+  });
+
+  test("a short fragment from the owner is not a promise", () => {
+    // "dekhta hoon" is not a commitment, and the noise list cannot enumerate
+    // every stub. Length is the guard.
+    const g = makeGroup();
+    const t = tracker();
+    for (const text of ['dekhta hoon', 'haan bhai', 'kal dekhenge']) {
+      assert.equal(t.maybeQueue(msg({ senderPhone: OWNER, text }), g), false,
+        `should skip: ${text}`);
+    }
+    assert.equal(repo.trackerOutbox.pending(10).length, 0);
   });
 
   test('noise, commands and empty text are not queued', () => {
