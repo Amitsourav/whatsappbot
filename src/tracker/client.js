@@ -267,10 +267,14 @@ class TrackerClient {
     const result = await response.json().catch(() => ({}));
     repo.trackerOutbox.markSent(ids);
 
-    // created_tasks: 0 is an ordinary outcome — usually nothing in the batch was
-    // a task. Logged at debug so a quiet group does not fill the log.
+    // created_tasks: 0 is an ordinary outcome and never an error. It means
+    // either nothing in the batch was a task, or — per Tracker, 11 Sep 2026 —
+    // it WAS a task that matched something already open on Amit's list and was
+    // merged onto it as a follow-up. Both are correct; neither is a drop, so
+    // this must never be logged as a failure.
     logger.debug(`Tracker accepted ${ids.length} from ${waGroupId}: `
-      + `${result.created_tasks ?? '?'} task(s) created`);
+      + `${result.created_tasks ?? '?'} new task(s) `
+      + '(0 can mean merged into an existing one)');
 
     return { sent: ids.length, failed: 0 };
   }
