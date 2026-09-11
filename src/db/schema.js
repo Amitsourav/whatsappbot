@@ -290,6 +290,23 @@ const MIGRATIONS = [
         ON tracker_outbox(status, wa_group_id) WHERE status = 'pending';
     `
   }
+  ,{
+    name: '005_tracker_all_messages',
+    sql: `
+      -- Forward EVERY message from this group to Tracker, not only the ones that
+      -- tag Amit or carry a "Task" marker.
+      --
+      -- For a group that exists solely to hand him work, the marker rule is the
+      -- wrong shape: seen live on 11 Sep, a colleague wrote "Task" once and then
+      -- continued the numbered list across four more messages, so items 34-37
+      -- were never forwarded. In a dedicated group the honest rule is "all of
+      -- it", and Tracker's AI does the filtering it was built for.
+      --
+      -- Off by default, and separate from tracker_enabled, so switching Tracker
+      -- on for a busy shared group never silently ships its whole conversation.
+      ALTER TABLE groups ADD COLUMN tracker_all_messages INTEGER NOT NULL DEFAULT 0;
+    `
+  }
 ];
 
 module.exports = { MIGRATIONS };

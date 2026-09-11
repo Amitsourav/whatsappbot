@@ -20,10 +20,11 @@ const SETTINGS = {
 };
 
 /** A group with the Tracker switch on but lead capture off — the common case. */
-function makeGroup({ tracker = 1, active = 0 } = {}) {
+function makeGroup({ tracker = 1, active = 0, all = 0 } = {}) {
   const g = repo.groups.upsert(GROUP_JID, 'AdmitVerse Tech Team');
   repo.groups.setActive(g.id, active);
   repo.groups.setTrackerEnabled(g.id, tracker);
+  repo.groups.setTrackerAllMessages(g.id, all);
   return repo.groups.byWaId(GROUP_JID);
 }
 
@@ -235,6 +236,55 @@ describe('maybeQueue — what gets forwarded', () => {
     // Seconds, not milliseconds — a millisecond value would date the task to 58,000 AD.
     assert.equal(payload.timestamp, 1789077000);
     assert.ok(String(payload.timestamp).length <= 10);
+  });
+});
+
+describe('a group that is only for Amit\'s work', () => {
+  test('forwards everything, marker or not', () => {
+    // Seen live on 11 Sep: a colleague wrote "Task" once, then carried the
+    // numbering across four more messages. Items 31-33 were forwarded and 34-37
+    // were dropped, because the marker rule reads each message on its own. In a
+    // group that exists solely to hand him work, all of it is in scope.
+    const g = makeGroup({ all: 1 });
+    const t = tracker();
+
+    for (const text of [
+      'Task\n31. Ireland as a next destination for organic ranking',
+      '34. Invoice changes of Kuhoo',
+      '35. Invoices have been uploaded but somehow not mapped student wise',
+      '36. Editable amount for previous invoice to be opened',
+      'website live nhi hai shayad iska'
+    ]) {
+      assert.ok(t.maybeQueue(msg({ text }), g), `should forward: ${text.slice(0, 40)}`);
+    }
+    assert.equal(repo.trackerOutbox.pending(10).length, 5);
+  });
+
+  test('acknowledgements and commands are still dropped', () => {
+    // "Everything" never means literally everything — sending "ok" to an AI to
+    // be told it is not a task is a cost with no possible benefit.
+    const g = makeGroup({ all: 1 });
+    const t = tracker();
+    for (const text of ['ok', 'done', 'thik hai', '👍', 'my leads', '   ']) {
+      assert.equal(t.maybeQueue(msg({ text }), g), false, `should skip: ${text}`);
+    }
+    assert.equal(repo.trackerOutbox.pending(10).length, 0);
+  });
+
+  test('the flags still describe the message accurately', () => {
+    const g = makeGroup({ all: 1 });
+    tracker().maybeQueue(msg({ text: '34. Invoice changes of Kuhoo' }), g);
+    const p = JSON.parse(repo.trackerOutbox.pending(1)[0].payload);
+    assert.equal(p.mentionedMe, false);
+    assert.equal(p.fromOwner, false);
+  });
+
+  test('OFF by default — a normal group keeps the marker rule', () => {
+    // The guard that stops switching Tracker on for a busy shared group from
+    // shipping its whole conversation.
+    const g = makeGroup();
+    assert.equal(g.tracker_all_messages, 0);
+    assert.equal(tracker().maybeQueue(msg({ text: '34. Invoice changes of Kuhoo' }), g), false);
   });
 });
 

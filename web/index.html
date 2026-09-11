@@ -271,9 +271,12 @@ const views = {
         the bot never posts in those.</p>
       <p class="muted"><b>Tasks &rarr; Tracker</b> forwards this group's messages to
         your task app for review. It is independent of everything else here, works
-        whether or not the group is watched for leads, and never posts anything.</p>
+        whether or not the group is watched for leads, and never posts anything.
+        <b>Everything</b> forwards every message from that group rather than only
+        the ones tagging you or marked <code>Task</code> — for a group that exists
+        solely to hand you work.</p>
       <div class="scroll"><table>
-        <tr><th>Group</th><th>Watch</th><th>Type</th><th>Bank</th><th>Replies</th><th>Tasks&nbsp;&rarr;&nbsp;Tracker</th></tr>
+        <tr><th>Group</th><th>Watch</th><th>Type</th><th>Bank</th><th>Replies</th><th>Tasks&nbsp;&rarr;&nbsp;Tracker</th><th>Everything</th></tr>
         ${groups.map((g) => `<tr>
           <td>${esc(g.name)}</td>
           <td><label class="switch"><input type="checkbox" ${g.is_active ? 'checked' : ''}
@@ -296,6 +299,10 @@ const views = {
                  onchange="saveGroup(${g.id},{send_enabled:this.checked})"></label>`}</td>
           <td><label class="switch"><input type="checkbox" ${g.tracker_enabled ? 'checked' : ''}
               onchange="saveGroup(${g.id},{tracker_enabled:this.checked})"></label></td>
+          <td>${g.tracker_enabled
+            ? `<label class="switch"><input type="checkbox" ${g.tracker_all_messages ? 'checked' : ''}
+                 onchange="saveGroup(${g.id},{tracker_all_messages:this.checked})"></label>`
+            : '<span class="pill">—</span>'}</td>
         </tr>`).join('')}
       </table></div>
     </div>`;

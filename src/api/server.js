@@ -137,6 +137,9 @@ function createServer({ whatsapp, crm, orchestrator, jobs = {} }) {
     if (req.body?.tracker_enabled !== undefined) {
       repo.groups.setTrackerEnabled(id, req.body.tracker_enabled);
     }
+    if (req.body?.tracker_all_messages !== undefined) {
+      repo.groups.setTrackerAllMessages(id, req.body.tracker_all_messages);
+    }
     // Set last: a bank purpose forces sending off, and that must win.
     if (sendEnabled !== undefined) repo.groups.setSendEnabled(id, sendEnabled);
 

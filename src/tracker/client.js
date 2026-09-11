@@ -152,16 +152,23 @@ class TrackerClient {
     const isReplyToMe = !fromOwner
       && same(message.quotedAuthorPhone, this.settings.ownerPhone);
 
-    if (fromOwner) {
-      // A promise is never tagged and never carries the Task marker, so neither
-      // is required. Length is the only guard: Tracker's AI is the real filter
-      // and runs a higher confidence floor here than for tasks, because
-      // inventing a promise is worse than missing one.
-      if (text.split(/\s+/).filter(Boolean).length < MIN_OWNER_WORDS) return false;
-    } else if (!mentionedMe && !isReplyToMe && !taskMarked(text)) {
-      // Three ways a message becomes Amit's: he was tagged, it answers something
-      // he said, or the sender wrote "Task" at the top to say so outright.
-      return false;
+    // A group that exists only to hand Amit work forwards everything, and lets
+    // Tracker's AI decide. The marker rule cannot survive how people actually
+    // write a list: on 11 Sep a colleague wrote "Task" once and carried the
+    // numbering across four more messages, so items 34-37 were dropped while
+    // 31-33 went through. In a dedicated group, every message is in scope.
+    if (!group.tracker_all_messages) {
+      if (fromOwner) {
+        // A promise is never tagged and never carries the Task marker, so neither
+        // is required. Length is the only guard: Tracker's AI is the real filter
+        // and runs a higher confidence floor here than for tasks, because
+        // inventing a promise is worse than missing one.
+        if (text.split(/\s+/).filter(Boolean).length < MIN_OWNER_WORDS) return false;
+      } else if (!mentionedMe && !isReplyToMe && !taskMarked(text)) {
+        // Three ways a message becomes Amit's: he was tagged, it answers something
+        // he said, or the sender wrote "Task" at the top to say so outright.
+        return false;
+      }
     }
 
     const row = repo.trackerOutbox.enqueue({

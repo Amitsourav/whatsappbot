@@ -78,6 +78,15 @@ const groups = {
       .run(enabled ? 1 : 0, id);
   },
 
+  /**
+   * Forward everything from this group, not just tagged or marked messages.
+   * Only meaningful when tracker_enabled is already on.
+   */
+  setTrackerAllMessages(id, enabled) {
+    get().prepare("UPDATE groups SET tracker_all_messages = ?, updated_at = datetime('now') WHERE id = ?")
+      .run(enabled ? 1 : 0, id);
+  },
+
   setPurpose(id, purpose) {
     get().prepare(`
       UPDATE groups
