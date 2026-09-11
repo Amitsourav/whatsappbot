@@ -27,8 +27,20 @@ const MAX_PER_POST = 40;
 /** Give up on a row after this many attempts — the ceiling used elsewhere. */
 const MAX_ATTEMPTS = 8;
 
-/** A slow Tracker must not stall the flush loop. */
-const REQUEST_TIMEOUT_MS = 10_000;
+/**
+ * How long to wait for Tracker before giving up on a batch.
+ *
+ * The brief said 10s. Measured against the live endpoint on 11 Sep 2026 that is
+ * too tight: a single message takes 7.5-9.2s warm, and a full batch of twenty
+ * took 11.8s. At 10s every full batch would time out, retry, time out again and
+ * be marked failed after eight attempts — while Tracker had received and
+ * processed each one. Our database would read "lost" and theirs "done", which is
+ * the worst kind of failure because neither side looks broken.
+ *
+ * 30s is roughly triple the measured worst case. Configurable so it can move
+ * without a deploy if their latency changes.
+ */
+const REQUEST_TIMEOUT_MS = config.tracker.timeoutMs || 30_000;
 
 /**
  * A message the sender explicitly marked as a task, by opening it with "Task".

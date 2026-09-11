@@ -141,7 +141,10 @@ const config = {
     // Amit's WhatsApp number. Used to tell "tagged me" from "tagged someone else".
     ownerPhone: process.env.TRACKER_OWNER_PHONE || '+917004428198',
     flushMs: int(process.env.TRACKER_FLUSH_MS, 60_000),
-    batchSize: int(process.env.TRACKER_BATCH_SIZE, 20)
+    batchSize: int(process.env.TRACKER_BATCH_SIZE, 20),
+    // Their endpoint measured 7.5-11.8s depending on batch size, so the brief's
+    // 10s left no margin at all. See the note in tracker/client.js.
+    timeoutMs: int(process.env.TRACKER_TIMEOUT_MS, 30_000)
   },
 
   /** Duplicate suppression window, in minutes. */
